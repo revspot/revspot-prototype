@@ -10,6 +10,7 @@ import {
   X,
   MessageCircle,
   Plus,
+  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { extractedProfile, strategyData } from "@/lib/wizard-data";
@@ -44,6 +45,11 @@ const fadeUp = {
 export function Step2BusinessProfile({ onNext, onBack }: Step2Props) {
   const [isGenerating, setIsGenerating] = useState(true);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [editingPersonaId, setEditingPersonaId] = useState<string | null>(null);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [regeneratingPersonaId, setRegeneratingPersonaId] = useState<string | null>(null);
+  const [manualEditingPersonaId, setManualEditingPersonaId] = useState<string | null>(null);
+  const [manualEditText, setManualEditText] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -90,6 +96,110 @@ export function Step2BusinessProfile({ onNext, onBack }: Step2Props) {
   const closeChat = () => {
     setChatOpen(false);
     setChatInput("");
+  };
+
+  const formatPersonaText = (persona: Persona) =>
+    `${persona.name}, ${persona.age}\n${persona.role}\n\n${persona.bullets.map((b) => `• ${b}`).join("\n")}`;
+
+  const parsePersonaText = (text: string, original: Persona): Persona => {
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return original;
+    // line 0: "Name, Age"
+    const firstCommaIdx = lines[0].lastIndexOf(",");
+    const name = firstCommaIdx > -1 ? lines[0].slice(0, firstCommaIdx).trim() : original.name;
+    const ageRaw = firstCommaIdx > -1 ? parseInt(lines[0].slice(firstCommaIdx + 1).trim(), 10) : NaN;
+    const age = isNaN(ageRaw) ? original.age : ageRaw;
+    // line 1: role (if not a bullet)
+    const roleCandidate = lines[1] && !lines[1].startsWith("•") && !lines[1].startsWith("-") ? lines[1] : original.role;
+    // remaining: bullets
+    const bullets = lines
+      .slice(2)
+      .filter((l) => l.startsWith("•") || l.startsWith("-"))
+      .map((l) => l.replace(/^[•\-]\s*/, "").trim())
+      .filter(Boolean);
+    return { ...original, name, age, role: roleCandidate, bullets: bullets.length > 0 ? bullets : original.bullets };
+  };
+
+  const startManualEdit = (persona: Persona) => {
+    setManualEditingPersonaId(persona.id);
+    setManualEditText(formatPersonaText(persona));
+  };
+
+  const cancelManualEdit = () => {
+    setManualEditingPersonaId(null);
+    setManualEditText("");
+  };
+
+  const saveManualEdit = (persona: Persona) => {
+    const updated = parsePersonaText(manualEditText, persona);
+    setPersonas((prev) => prev.map((p) => (p.id === persona.id ? updated : p)));
+    setManualEditingPersonaId(null);
+    setManualEditText("");
+  };
+
+  const startEditPersona = (persona: Persona) => {
+    setEditingPersonaId(persona.id);
+    setEditInstruction("");
+  };
+
+  const cancelEditPersona = () => {
+    setEditingPersonaId(null);
+    setEditInstruction("");
+  };
+
+  const regeneratePersona = (persona: Persona) => {
+    if (!editInstruction.trim()) return;
+    const instruction = editInstruction.trim();
+    setEditingPersonaId(null);
+    setEditInstruction("");
+    setRegeneratingPersonaId(persona.id);
+
+    setTimeout(() => {
+      const lower = instruction.toLowerCase();
+      const updated: Persona = { ...persona, bullets: [...persona.bullets] };
+
+      // Simulate AI applying the instruction
+      if (lower.includes("younger") || lower.includes("young")) {
+        updated.age = Math.max(22, persona.age - 6);
+      } else if (lower.includes("older") || lower.includes("senior")) {
+        updated.age = persona.age + 6;
+      }
+      if (lower.includes("investor") || lower.includes("investment")) {
+        updated.role = "Real Estate Investor, High-Net-Worth Individual";
+        updated.bullets = [
+          "Actively looking to diversify portfolio with residential real estate in Bangalore.",
+          "Focused on rental yield and capital appreciation — budget ₹2–4Cr.",
+          "Prefers branded developers with strong track record and RERA compliance.",
+        ];
+      } else if (lower.includes("first-time") || lower.includes("first time") || lower.includes("newlywed") || lower.includes("married")) {
+        updated.role = "First-Time Homebuyer, Recently Married";
+        updated.bullets = [
+          "Just married and looking for their first own home — currently living with parents.",
+          "Budget-conscious but wants a reputed builder for peace of mind.",
+          "Prefers 2BHK close to metro and shopping, with option to upgrade later.",
+        ];
+      } else if (lower.includes("budget") || lower.includes("affordable") || lower.includes("cheaper")) {
+        updated.bullets = updated.bullets.map((b) =>
+          b.includes("₹") ? b.replace(/₹[\d.]+Cr/g, "₹1.2Cr") : b
+        );
+      } else if (lower.includes("nri") || lower.includes("abroad") || lower.includes("overseas")) {
+        updated.role = `NRI Investor, ${persona.role.split(",").slice(1).join(",").trim() || "Based Abroad"}`;
+        updated.bullets = [
+          "Based overseas and looking to invest in home city as a long-term asset.",
+          "Wants hassle-free ownership — prefers managed properties with rental potential.",
+          "Trusts branded developers; RERA compliance and transparency are non-negotiable.",
+        ];
+      } else {
+        // Generic: append the instruction as a new insight and refresh bullets slightly
+        updated.bullets = [
+          ...persona.bullets.slice(0, 2),
+          `${instruction.charAt(0).toUpperCase() + instruction.slice(1)}.`,
+        ];
+      }
+
+      setPersonas((prev) => prev.map((p) => (p.id === persona.id ? updated : p)));
+      setRegeneratingPersonaId(null);
+    }, 1800);
   };
 
   const sendChat = () => {
@@ -355,31 +465,163 @@ export function Step2BusinessProfile({ onNext, onBack }: Step2Props) {
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-4">
-              {personas.map((persona, i) => (
-                <motion.div
-                  key={persona.id}
-                  custom={i}
-                  initial="hidden"
-                  animate="visible"
-                  variants={fadeUp}
-                  className="bg-white border border-border rounded-card p-5"
-                >
-                  <h4 className="text-[14px] font-semibold text-text-primary mb-0.5">
-                    {persona.name}, {persona.age}
-                  </h4>
-                  <p className="text-[11px] text-text-tertiary mb-3">
-                    {persona.role}
-                  </p>
-                  <ul className="space-y-2">
-                    {persona.bullets.map((bullet, j) => (
-                      <li key={j} className="flex items-start gap-2 text-[12px] text-text-secondary leading-relaxed">
-                        <span className="text-text-tertiary mt-[3px] shrink-0">•</span>
-                        <span>{bullet}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </motion.div>
-              ))}
+              {personas.map((persona, i) => {
+                const isEditing = editingPersonaId === persona.id;
+                const isManualEditing = manualEditingPersonaId === persona.id;
+                const isRegenerating = regeneratingPersonaId === persona.id;
+                const anyActive = editingPersonaId !== null || manualEditingPersonaId !== null || regeneratingPersonaId !== null;
+                const isLocked = anyActive && !isEditing && !isManualEditing && !isRegenerating;
+
+                /* ── Regenerating skeleton ── */
+                if (isRegenerating) {
+                  return (
+                    <div key={persona.id} className="bg-white border border-accent/30 rounded-card p-5 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-3.5 w-3.5 border-2 border-accent border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span className="text-[11px] font-medium text-accent">Regenerating with AI…</span>
+                      </div>
+                      <div className="h-4 w-2/3 bg-surface-secondary rounded-[6px] animate-pulse" />
+                      <div className="h-3 w-1/2 bg-surface-secondary rounded-[6px] animate-pulse" />
+                      <div className="space-y-2 pt-1">
+                        <div className="h-3 w-full bg-surface-secondary rounded-[6px] animate-pulse" />
+                        <div className="h-3 w-5/6 bg-surface-secondary rounded-[6px] animate-pulse" />
+                        <div className="h-3 w-4/5 bg-surface-secondary rounded-[6px] animate-pulse" />
+                      </div>
+                    </div>
+                  );
+                }
+
+                /* ── Manual edit mode ── */
+                if (isManualEditing) {
+                  return (
+                    <motion.div
+                      key={persona.id}
+                      layout
+                      className="bg-white border-2 border-accent rounded-card p-5 flex flex-col gap-4"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Pencil size={12} strokeWidth={1.5} className="text-accent" />
+                        <span className="text-[10px] font-semibold text-accent uppercase tracking-[0.5px]">Edit manually</span>
+                      </div>
+                      <textarea
+                        autoFocus
+                        value={manualEditText}
+                        onChange={(e) => setManualEditText(e.target.value)}
+                        className="flex-1 w-full px-3 py-2.5 text-[12px] border border-border rounded-input bg-white text-text-primary focus:outline-none focus:border-accent resize-none leading-relaxed"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={cancelManualEdit}
+                          className="flex-1 h-8 text-[12px] font-medium text-text-secondary border border-border rounded-button bg-white hover:bg-surface-page transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => saveManualEdit(persona)}
+                          className="flex-1 h-8 text-[12px] font-medium text-white bg-accent rounded-button hover:bg-accent-hover transition-colors"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                }
+
+                /* ── AI edit mode ── */
+                if (isEditing) {
+                  return (
+                    <motion.div
+                      key={persona.id}
+                      layout
+                      className="bg-white border-2 border-accent rounded-card p-5 flex flex-col gap-4"
+                    >
+                      {/* Persona header (read-only context) */}
+                      <div>
+                        <h4 className="text-[14px] font-semibold text-text-primary">
+                          {persona.name}, {persona.age}
+                        </h4>
+                        <p className="text-[11px] text-text-tertiary mt-0.5">{persona.role}</p>
+                      </div>
+
+                      {/* AI instruction */}
+                      <div className="flex-1 flex flex-col">
+                        <label className="block text-[10px] font-semibold text-accent uppercase tracking-[0.5px] mb-2">
+                          What should AI change?
+                        </label>
+                        <textarea
+                          autoFocus
+                          value={editInstruction}
+                          onChange={(e) => setEditInstruction(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); regeneratePersona(persona); } }}
+                          placeholder="e.g., make them an NRI investor, focus on budget segment, add more urgency…"
+                          className="flex-1 w-full px-3 py-2 text-[12px] border border-border rounded-input bg-white text-text-primary focus:outline-none focus:border-accent resize-none leading-relaxed placeholder:text-text-tertiary"
+                        />
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={cancelEditPersona}
+                          className="flex-1 h-8 text-[12px] font-medium text-text-secondary border border-border rounded-button bg-white hover:bg-surface-page transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => regeneratePersona(persona)}
+                          disabled={!editInstruction.trim()}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 text-[12px] font-medium text-white bg-accent rounded-button hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <RefreshCw size={12} strokeWidth={2} />
+                          Regenerate
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                }
+
+                /* ── View mode ── */
+                return (
+                  <motion.div
+                    key={persona.id}
+                    custom={i}
+                    initial="hidden"
+                    animate="visible"
+                    variants={fadeUp}
+                    className={`bg-white border rounded-card p-5 flex flex-col transition-opacity duration-150 ${
+                      isLocked ? "opacity-40 pointer-events-none" : "border-border"
+                    }`}
+                  >
+                    <h4 className="text-[14px] font-semibold text-text-primary truncate mb-0.5">
+                      {persona.name}, {persona.age}
+                    </h4>
+                    <p className="text-[11px] text-text-tertiary mb-3">{persona.role}</p>
+                    <ul className="space-y-2 flex-1">
+                      {persona.bullets.map((bullet, j) => (
+                        <li key={j} className="flex items-start gap-2 text-[12px] text-text-secondary leading-relaxed">
+                          <span className="text-text-tertiary mt-[3px] shrink-0">•</span>
+                          <span>{bullet}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex gap-2 pt-3 mt-4 border-t border-border">
+                      <button
+                        onClick={() => startManualEdit(persona)}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 text-[11px] font-medium text-text-secondary border border-border rounded-button hover:text-accent hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                      >
+                        <Pencil size={11} strokeWidth={1.5} />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => startEditPersona(persona)}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 text-[11px] font-medium text-text-secondary border border-border rounded-button hover:text-accent hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                      >
+                        <Sparkles size={11} strokeWidth={1.5} />
+                        Refresh
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
 
             <p className="text-[12px] text-text-tertiary">
