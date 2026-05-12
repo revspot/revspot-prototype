@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRight, Pencil, RefreshCw, Sparkles, User } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, MessageSquare, Pencil, RefreshCw, Sparkles, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ChatMessage, ConceptVersion, MockupField } from "./types";
 import { CreativeChatPanel } from "./creative-chat-panel";
@@ -55,12 +55,25 @@ export function CreativeConceptEditor({
   // surface in picker mode so the user can see what they asked for.
   const userPrompt = messages.find((m) => m.role === "user")?.text;
 
-  // Edit toggle state — only enabled in refine mode. When ON, the AdMockup
-  // text becomes click-to-edit.
+  // Edit toggle — flips the AdMockup into click-to-edit (Canva-style).
+  // Available both on the Selected view and inside refine mode.
   const [editMode, setEditMode] = useState(false);
-  // Reset edit mode whenever the active version changes.
+  // refineOpen flips between the lightweight Selected view (default after pick)
+  // and the heavier 2-column refine view (chat + version strip).
+  const [refineOpen, setRefineOpen] = useState(false);
+
+  // When the user transitions from picker (null) → picked: reset to the
+  // Selected view (not refine), and clear any leftover edit toggle.
+  // Subsequent activeVersionId changes (e.g., inline edits create new versions)
+  // should NOT reset these — otherwise inline editing would bounce out of edit
+  // mode every keystroke commit.
+  const prevActiveRef = useRef<string | null>(activeVersionId);
   useEffect(() => {
-    setEditMode(false);
+    if (prevActiveRef.current === null && activeVersionId !== null) {
+      setRefineOpen(false);
+      setEditMode(false);
+    }
+    prevActiveRef.current = activeVersionId;
   }, [activeVersionId]);
 
   if (isPickerMode) {
@@ -71,6 +84,24 @@ export function CreativeConceptEditor({
         userPrompt={userPrompt}
         isGenerating={isGenerating}
         onPick={onSelectVersion}
+      />
+    );
+  }
+
+  // Selected view: between picker and refine. Shows the picked concept + 3 CTAs.
+  if (!refineOpen) {
+    return (
+      <SelectedView
+        version={activeVersion!}
+        editMode={editMode}
+        isGenerating={isGenerating}
+        onToggleEdit={() => setEditMode((v) => !v)}
+        onEditWithAi={() => {
+          setEditMode(false);
+          setRefineOpen(true);
+        }}
+        onInlineEdit={onInlineEdit}
+        onFinalize={onFinalize}
       />
     );
   }
@@ -326,5 +357,127 @@ function PickerTile({ concept, index, onPick }: PickerTileProps) {
         <div className="text-[11px] font-medium text-white truncate">{concept.label}</div>
       </div>
     </motion.button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Selected view — between picker and refine                          */
+/* ------------------------------------------------------------------ */
+
+interface SelectedViewProps {
+  version: ConceptVersion;
+  editMode: boolean;
+  isGenerating: boolean;
+  onToggleEdit: () => void;
+  onEditWithAi: () => void;
+  onInlineEdit: (field: MockupField, value: string) => void;
+  onFinalize: () => void;
+}
+
+function SelectedView({
+  version,
+  editMode,
+  isGenerating,
+  onToggleEdit,
+  onEditWithAi,
+  onInlineEdit,
+  onFinalize,
+}: SelectedViewProps) {
+  return (
+    <motion.div
+      key="selected"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      className="h-full overflow-y-auto bg-surface-page"
+    >
+      <div className="min-h-full flex flex-col items-center justify-center px-6 py-8">
+        <div className="text-center mb-3 min-h-[24px]">
+          <AnimatePresence mode="wait">
+            {editMode ? (
+              <motion.div
+                key="edit-hint"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.15 }}
+                className="inline-flex items-center gap-1.5 text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 bg-clip-text text-transparent"
+              >
+                <Pencil size={11} strokeWidth={1.5} className="text-violet-500" />
+                Editing — click any text to change it
+              </motion.div>
+            ) : (
+              <motion.div
+                key="picked-label"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.15 }}
+                className="text-[12px] text-text-tertiary"
+              >
+                Picked: <span className="font-semibold text-text-primary">{version.label}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <motion.div
+          key={version.id}
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.2 }}
+          className={`aspect-square rounded-card overflow-hidden border bg-white transition-all duration-200 ${
+            editMode
+              ? "border-violet-400/60 shadow-[0_12px_40px_-12px_rgba(139,92,246,0.45)]"
+              : "border-border shadow-[0_8px_30px_-12px_rgba(0,0,0,0.08)]"
+          }`}
+          style={{ width: "min(100%, 460px)" }}
+        >
+          <AdMockup
+            variant={version.variant}
+            headline={version.headline}
+            mockup={version.mockup}
+            onEditText={editMode ? onInlineEdit : undefined}
+          />
+        </motion.div>
+
+        <div className="mt-5 flex items-center gap-2 flex-wrap justify-center">
+          <button
+            type="button"
+            onClick={onToggleEdit}
+            disabled={isGenerating}
+            className={`inline-flex items-center gap-1.5 h-9 px-3.5 text-[12px] font-medium rounded-button border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed ${
+              editMode
+                ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white border-transparent shadow-sm"
+                : "text-text-secondary border-border bg-white hover:bg-surface-page hover:text-text-primary"
+            }`}
+            aria-pressed={editMode}
+          >
+            <Pencil size={12} strokeWidth={1.5} />
+            {editMode ? "Done" : "Edit inline"}
+          </button>
+          <button
+            type="button"
+            onClick={onEditWithAi}
+            disabled={isGenerating || editMode}
+            title={editMode ? "Finish inline edits first" : "Open chat refine view"}
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 text-[12px] font-medium text-text-secondary border border-border bg-white hover:bg-surface-page hover:text-text-primary rounded-button transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <MessageSquare size={12} strokeWidth={1.5} />
+            Edit with AI
+          </button>
+          <button
+            type="button"
+            onClick={onFinalize}
+            disabled={isGenerating || editMode}
+            title={editMode ? "Finish inline edits first" : undefined}
+            className="inline-flex items-center gap-1.5 h-9 px-4 text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white rounded-button transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_4px_14px_-4px_rgba(139,92,246,0.5)]"
+          >
+            Finalize concept
+            <ArrowRight size={12} strokeWidth={2} />
+          </button>
+        </div>
+      </div>
+    </motion.div>
   );
 }
