@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -8,6 +8,7 @@ import {
   Grid3X3,
   List,
   Image as ImageIcon,
+  Sparkles,
   Video,
   Layers,
   FileText,
@@ -20,6 +21,14 @@ import {
 import { EmptyState } from "@/components/layout/empty-state";
 import { IllustrationCreatives, IllustrationSearchEmpty } from "@/components/illustrations/empty-states";
 import { useDemoMode } from "@/lib/demo-mode";
+import {
+  CreativeGeneratorModal,
+  type GeneratedCreative,
+} from "@/components/shared/creative-generator-modal";
+import {
+  NewCreativeLauncher,
+  type LaunchContext,
+} from "@/components/shared/new-creative-launcher";
 
 const fadeIn = { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.2, ease: "easeOut" as const } };
 
@@ -34,7 +43,7 @@ interface Creative {
   createdAt: string;
 }
 
-const creatives: Creative[] = [
+const initialCreatives: Creative[] = [
   { id: "cr-1", name: "Godrej Air 3BHK Carousel v2", format: "carousel", dimensions: "1080×1080", campaign: "Godrej Air Phase 3", createdAt: "2026-03-18" },
   { id: "cr-2", name: "Godrej Air Lifestyle Video", format: "video", dimensions: "1080×1920", campaign: "Godrej Air Phase 3", createdAt: "2026-03-16" },
   { id: "cr-3", name: "Godrej Air Floor Plan Static", format: "image", dimensions: "1080×1080", campaign: "Godrej Air Phase 3", createdAt: "2026-03-14" },
@@ -56,8 +65,6 @@ const formatConfig: Record<CreativeFormat, { label: string; icon: typeof ImageIc
   document: { label: "Document", icon: FileText, cls: "bg-surface-secondary text-text-secondary" },
 };
 
-const campaigns = [...new Set(creatives.map((c) => c.campaign))];
-
 function FormatBadge({ format }: { format: CreativeFormat }) {
   const { label, cls } = formatConfig[format];
   return (
@@ -69,11 +76,29 @@ function FormatBadge({ format }: { format: CreativeFormat }) {
 
 export default function CreativesPage() {
   const { isEmpty } = useDemoMode();
+  const [creatives, setCreatives] = useState<Creative[]>(initialCreatives);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | CreativeFormat>("all");
   const [campaignFilter, setCampaignFilter] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [showUpload, setShowUpload] = useState(false);
+  // Generate flow: launcher dialog -> CreativeGeneratorModal.
+  const [launcherOpen, setLauncherOpen] = useState(false);
+  const [generatorCtx, setGeneratorCtx] = useState<LaunchContext | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Campaigns surfaced in the filter dropdown — derived from the current
+  // (possibly mutated) library so newly-generated entries show up as options.
+  const campaigns = useMemo(
+    () => Array.from(new Set(creatives.map((c) => c.campaign))),
+    [creatives]
+  );
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const filtered = useMemo(() => {
     if (isEmpty) return [];
@@ -83,23 +108,56 @@ export default function CreativesPage() {
       if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [search, typeFilter, campaignFilter, isEmpty]);
+  }, [creatives, search, typeFilter, campaignFilter, isEmpty]);
+
+  const handleGenerated = (created: GeneratedCreative[]) => {
+    if (!generatorCtx || created.length === 0) {
+      setGeneratorCtx(null);
+      return;
+    }
+    const ctx = generatorCtx;
+    const tag = ctx.sourceCampaign ?? ctx.angleName ?? "Custom";
+    const now = new Date().toISOString().slice(0, 10);
+    // One library row per generated size — keeps the existing per-asset shape.
+    const newRows: Creative[] = created.map((c, i) => ({
+      id: `cr-${Date.now()}-${i}`,
+      name: `${ctx.angleName} — ${c.label}`,
+      format: "image",
+      dimensions: c.size,
+      campaign: tag,
+      createdAt: now,
+    }));
+    setCreatives((prev) => [...newRows, ...prev]);
+    setGeneratorCtx(null);
+    setToast(
+      `${newRows.length} creative${newRows.length !== 1 ? "s" : ""} added · ${ctx.angleName}`
+    );
+  };
 
   return (
     <motion.div {...fadeIn}>
       {/* Header */}
       <motion.div className="flex items-center justify-between mb-6">
         <div>
-          <div className="text-meta text-text-secondary mb-1">Lead Generation</div>
+          <div className="text-meta text-text-secondary mb-1">Tools</div>
           <h1 className="text-page-title text-text-primary">Creatives</h1>
         </div>
-        <button
-          onClick={() => setShowUpload(true)}
-          className="inline-flex items-center gap-1.5 h-9 px-4 bg-accent text-white text-[13px] font-medium rounded-button hover:bg-accent-hover transition-colors duration-150"
-        >
-          <Plus size={15} strokeWidth={2} />
-          Upload creative
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowUpload(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 text-[13px] font-medium text-text-secondary border border-border bg-white hover:bg-surface-page hover:text-text-primary rounded-button transition-colors duration-150"
+          >
+            <Upload size={14} strokeWidth={1.5} />
+            Upload
+          </button>
+          <button
+            onClick={() => setLauncherOpen(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-4 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white text-[13px] font-semibold rounded-button transition-all duration-150 shadow-[0_4px_14px_-4px_rgba(139,92,246,0.5)]"
+          >
+            <Sparkles size={14} strokeWidth={1.5} />
+            New creative
+          </button>
+        </div>
       </motion.div>
 
       {/* Filters */}
@@ -188,13 +246,24 @@ export default function CreativesPage() {
           ) : (
             <EmptyState
               illustration={<IllustrationCreatives />}
-              title="No creatives uploaded"
-              description="Upload images, videos, or carousels to use in your campaigns."
+              title="No creatives yet"
+              description="Generate a new creative with AI, or upload an existing asset."
               action={
-                <button onClick={() => setShowUpload(true)}
-                  className="h-9 px-4 bg-accent text-white text-[13px] font-medium rounded-button hover:bg-accent-hover transition-colors duration-150">
-                  Upload creative
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setLauncherOpen(true)}
+                    className="inline-flex items-center gap-1.5 h-9 px-4 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white text-[13px] font-semibold rounded-button transition-all duration-150 shadow-[0_4px_14px_-4px_rgba(139,92,246,0.5)]"
+                  >
+                    <Sparkles size={14} strokeWidth={1.5} />
+                    New creative
+                  </button>
+                  <button
+                    onClick={() => setShowUpload(true)}
+                    className="h-9 px-4 text-[13px] font-medium text-text-secondary border border-border rounded-button bg-white hover:bg-surface-page hover:text-text-primary transition-colors duration-150"
+                  >
+                    Upload
+                  </button>
+                </div>
               }
             />
           )}
@@ -380,6 +449,42 @@ export default function CreativesPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* New-creative launcher (Step 1: pick a strategy) */}
+      <NewCreativeLauncher
+        open={launcherOpen}
+        onClose={() => setLauncherOpen(false)}
+        onContinue={(ctx) => {
+          setLauncherOpen(false);
+          setGeneratorCtx(ctx);
+        }}
+      />
+
+      {/* Generator modal (Step 2: full creative-generation flow) */}
+      {generatorCtx && (
+        <CreativeGeneratorModal
+          open={!!generatorCtx}
+          onClose={() => setGeneratorCtx(null)}
+          onComplete={handleGenerated}
+          angleName={generatorCtx.angleName}
+          personaName={generatorCtx.personaName}
+          personaRole={generatorCtx.personaRole}
+          personaBullets={generatorCtx.personaBullets}
+          painPoint={generatorCtx.painPoint}
+          usp={generatorCtx.usp}
+          hook={generatorCtx.hook}
+          cta={generatorCtx.cta}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
+          <div className="inline-flex items-center gap-2 bg-text-primary text-white text-[13px] font-medium px-4 py-2.5 rounded-[8px] shadow-lg">
+            {toast}
+          </div>
+        </div>
       )}
     </motion.div>
   );

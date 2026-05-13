@@ -9,6 +9,7 @@ import {
   Zap,
   FileText,
   Globe,
+  Image as ImageIcon,
   Plug,
   Settings,
   Eye,
@@ -35,6 +36,7 @@ const navSections = [
   {
     label: "Tools",
     items: [
+      { name: "Creatives", href: "/creatives", icon: ImageIcon },
       { name: "Agents", href: "/agents-mvp", icon: Zap },
       { name: "Audiences", href: "/audiences", icon: Globe, comingSoon: true },
       { name: "Integrations", href: "/integrations", icon: Plug, comingSoon: true },
