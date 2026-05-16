@@ -124,12 +124,14 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* Portfolio table */}
-      <div className="card-base overflow-hidden">
+      {/* Portfolio table — wrapped in a horizontal-scroll container so
+          columns never collapse when the Spot panel is open. */}
+      <div className="card-base overflow-x-auto">
+        <div style={{ minWidth: 920 }}>
         {/* Table header */}
         <div
           className="grid items-center px-5 py-2.5 border-b border-border bg-surface-page text-[10px] uppercase tracking-[0.04em] font-semibold text-text-tertiary"
-          style={{ gridTemplateColumns: "1.7fr 90px 80px 80px 80px 90px 1fr 100px 24px" }}
+          style={{ gridTemplateColumns: "minmax(220px, 1.7fr) 90px 80px 80px 80px 90px minmax(160px, 1fr) 100px 24px" }}
         >
           <span>Project</span>
           <span className="text-right">Spend</span>
@@ -156,7 +158,7 @@ export default function ProjectsPage() {
               className={`hover-row text-left w-full grid items-center px-5 py-3.5 ${
                 last ? "" : "border-b border-border-subtle"
               }`}
-              style={{ gridTemplateColumns: "1.7fr 90px 80px 80px 80px 90px 1fr 100px 24px" }}
+              style={{ gridTemplateColumns: "minmax(220px, 1.7fr) 90px 80px 80px 80px 90px minmax(160px, 1fr) 100px 24px" }}
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div
@@ -200,7 +202,7 @@ export default function ProjectsPage() {
         {/* Footer totals */}
         <div
           className="grid items-center px-5 py-2.5 border-t border-border bg-surface-page text-[12px] font-medium"
-          style={{ gridTemplateColumns: "1.7fr 90px 80px 80px 80px 90px 1fr 100px 24px" }}
+          style={{ gridTemplateColumns: "minmax(220px, 1.7fr) 90px 80px 80px 80px 90px minmax(160px, 1fr) 100px 24px" }}
         >
           <span>Portfolio total</span>
           <span className="tabular-nums text-right">₹{totalSpend.toFixed(1)}L</span>
@@ -211,6 +213,7 @@ export default function ProjectsPage() {
           <span className="text-[11px] text-text-tertiary font-normal">across {rows.length} projects</span>
           <span />
           <span />
+        </div>
         </div>
       </div>
 
