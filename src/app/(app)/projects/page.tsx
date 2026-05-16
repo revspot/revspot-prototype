@@ -124,26 +124,29 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* Portfolio table — compact column widths so it fits at common
-          laptop viewports (~700px content area) even when the Spot panel
-          is open. Wrapped in a horizontal-scroll fallback for narrower
-          cases. */}
+      {/* Portfolio table — column-gap gives each cell breathing room so
+          values never touch the cell next door. Overflow-x scroll is a
+          safety net for very narrow viewports. */}
       {(() => {
         const COLS =
-          "minmax(180px, 2.2fr) 70px 60px 70px 60px minmax(140px, 1.4fr) 90px 20px";
+          "minmax(200px, 2.4fr) 80px 70px 80px 70px minmax(160px, 1.5fr) 90px 20px";
+        const gridStyle: React.CSSProperties = {
+          gridTemplateColumns: COLS,
+          columnGap: 18,
+        };
         return (
           <div className="card-base overflow-x-auto">
-            <div style={{ minWidth: 690 }}>
+            <div style={{ minWidth: 850 }}>
               {/* Table header */}
               <div
-                className="grid items-center px-4 py-2.5 border-b border-border bg-surface-page text-[10px] uppercase tracking-[0.04em] font-semibold text-text-tertiary"
-                style={{ gridTemplateColumns: COLS }}
+                className="grid items-center px-5 py-2.5 border-b border-border bg-surface-page text-[10px] uppercase tracking-[0.04em] font-semibold text-text-tertiary"
+                style={gridStyle}
               >
                 <span>Project</span>
                 <span className="text-right">Spend</span>
                 <span className="text-right">Leads</span>
-                <span className="text-right">Verif</span>
-                <span className="text-right">QL</span>
+                <span className="text-right">Verif rate</span>
+                <span className="text-right">QL rate</span>
                 <span>Goal progress</span>
                 <span className="text-right">Health</span>
                 <span />
@@ -155,10 +158,10 @@ export default function ProjectsPage() {
                   <button
                     key={p.id}
                     onClick={() => router.push(`/projects/${p.id}`)}
-                    className={`hover-row text-left w-full grid items-center px-4 py-3.5 ${
+                    className={`hover-row text-left w-full grid items-center px-5 py-3.5 ${
                       last ? "" : "border-b border-border-subtle"
                     }`}
-                    style={{ gridTemplateColumns: COLS }}
+                    style={gridStyle}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div
@@ -208,8 +211,8 @@ export default function ProjectsPage() {
 
               {/* Footer totals */}
               <div
-                className="grid items-center px-4 py-2.5 border-t border-border bg-surface-page text-[12px] font-medium"
-                style={{ gridTemplateColumns: COLS }}
+                className="grid items-center px-5 py-2.5 border-t border-border bg-surface-page text-[12px] font-medium"
+                style={gridStyle}
               >
                 <span>Portfolio total</span>
                 <span className="tabular-nums text-right">₹{totalSpend.toFixed(1)}L</span>
@@ -271,7 +274,7 @@ export default function ProjectsPage() {
           onClose={() => setCreateOpen(false)}
           onComplete={(id) => {
             setCreateOpen(false);
-            router.push(`/projects/${id}`);
+            router.push(`/projects/${id}/deploy`);
           }}
         />
       )}

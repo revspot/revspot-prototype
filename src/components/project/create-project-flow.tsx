@@ -1,19 +1,43 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Check, Sparkles, FileText, Upload } from "lucide-react";
+import {
+  X,
+  Check,
+  Sparkles,
+  FileText,
+  Upload,
+  Edit3,
+  Users,
+  Monitor,
+  Play,
+} from "lucide-react";
 import { SpotMark } from "@/components/spot/spot-mark";
 import { useSpotStore } from "@/lib/spot/store";
 
-type Stage = "intent" | "brief" | "goal" | "personas" | "review";
+type Stage = "intent" | "brief" | "goal" | "personas" | "plan";
 
 const STAGES: { key: Stage; label: string }[] = [
   { key: "intent", label: "Intent" },
   { key: "brief", label: "Brief" },
   { key: "goal", label: "Goal" },
   { key: "personas", label: "Personas" },
-  { key: "review", label: "Review" },
+  { key: "plan", label: "Media plan" },
 ];
+
+type PersonaDraft = {
+  id: string;
+  name: string;
+  age: string;
+  role: string;
+  want: string;
+  painPoint: string;
+  solution: string;
+  hhi: string;
+  geo: string;
+  share: number;
+  approved: boolean;
+};
 
 type Draft = {
   source: "pdf" | "url" | "manual";
@@ -27,12 +51,63 @@ type Draft = {
   goalKind: "leads" | "verified" | "qualified";
   goalTarget: string;
   goalWindow: string;
-  personas: Array<{ name: string; role: string; approved: boolean }>;
+  personas: PersonaDraft[];
 };
+
+const SEED_PERSONAS: PersonaDraft[] = [
+  {
+    id: "ps1",
+    name: "The Senior Tech Lead",
+    age: "34",
+    role: "Director at FAANG-tier IT services",
+    want:
+      "A larger, branded apartment in the same Pune East catchment without a longer commute to Hinjewadi.",
+    painPoint:
+      "Currently in a 2.5 BHK that's outgrown the family; doesn't want to move further from work or compromise on amenities.",
+    solution:
+      "Spacious 3 BHK with branded interiors, dedicated WFH room, and 14-min drive to Hinjewadi tech park.",
+    hhi: "₹55L+",
+    geo: "Pune East (Kharadi / Magarpatta)",
+    share: 38,
+    approved: true,
+  },
+  {
+    id: "ps2",
+    name: "The Pune Returnee",
+    age: "39",
+    role: "Senior IC returning from BLR/Mumbai",
+    want:
+      "A primary home in their hometown after years in another metro, ideally close to extended family.",
+    painPoint:
+      "Hard to evaluate options remotely; needs trust signals like RERA, builder reputation, and verifiable timelines.",
+    solution:
+      "RERA-cleared, Godrej-built, with a documented 8-week site-visit-anytime policy and live construction updates.",
+    hhi: "₹75L+",
+    geo: "BLR / Mumbai / Hyderabad (origin Pune)",
+    share: 28,
+    approved: true,
+  },
+  {
+    id: "ps3",
+    name: "The NRI Investor",
+    age: "43",
+    role: "US/UK-based, looking at 2nd home in India",
+    want:
+      "A primary-quality asset that rents at premium today and becomes a return home in 6-10 years.",
+    painPoint:
+      "Construction risk feels remote; property management cost and yield calculation aren't visible upfront.",
+    solution:
+      "RERA-verified milestones + managed-rental partner integration, with a yield calculator on the listing page.",
+    hhi: "$220K+",
+    geo: "Bay Area / NJ / London",
+    share: 22,
+    approved: false,
+  },
+];
 
 const SEED: Draft = {
   source: "pdf",
-  sourceLabel: "Project Brand Book v2.pdf",
+  sourceLabel: "Sky Gardens — Brand Book v2.pdf",
   name: "Godrej Sky Gardens · Pune",
   rera: "PRM/MH/RERA/...",
   micromarket: "Kharadi · Pune East",
@@ -42,22 +117,34 @@ const SEED: Draft = {
   goalKind: "verified",
   goalTarget: "240",
   goalWindow: "180 days",
-  personas: [
-    { name: "Senior Tech Lead", role: "Director, IT services", approved: true },
-    { name: "Pune Returnee", role: "Returning from BLR/Mumbai", approved: true },
-    { name: "NRI Investor", role: "US/UK-based, second home", approved: false },
-  ],
+  personas: SEED_PERSONAS,
 };
 
-function StagePill({ stage, current }: { stage: { key: Stage; label: string }; current: Stage }) {
+// ─── Atoms ────────────────────────────────────────────────────────────
+
+function StagePill({
+  stage,
+  current,
+  onClick,
+}: {
+  stage: { key: Stage; label: string };
+  current: Stage;
+  onClick?: () => void;
+}) {
   const idx = STAGES.findIndex((s) => s.key === stage.key);
   const currentIdx = STAGES.findIndex((s) => s.key === current);
   const done = idx < currentIdx;
   const active = idx === currentIdx;
   return (
-    <div className="flex items-center gap-1.5">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!done && !active}
+      className="flex items-center gap-1.5 flex-shrink-0"
+      style={{ cursor: done || active ? "pointer" : "not-allowed" }}
+    >
       <span
-        className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+        className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold flex-shrink-0"
         style={{
           background: done ? "#22C55E" : active ? "#1A1A1A" : "var(--bg-secondary)",
           color: done || active ? "#FFF" : "var(--text-3)",
@@ -66,12 +153,12 @@ function StagePill({ stage, current }: { stage: { key: Stage; label: string }; c
         {done ? "✓" : idx + 1}
       </span>
       <span
-        className="text-[11.5px]"
+        className="text-[11.5px] hidden md:inline"
         style={{ color: active ? "var(--text-1)" : "var(--text-3)", fontWeight: active ? 600 : 500 }}
       >
         {stage.label}
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -93,7 +180,13 @@ function SpotBubble({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DraftCard({ children }: { children: React.ReactNode }) {
+function DraftCard({
+  children,
+  label = "Spot's draft",
+}: {
+  children: React.ReactNode;
+  label?: string;
+}) {
   return (
     <div
       className="rounded-[10px] p-4 mb-3 fadeUp"
@@ -101,7 +194,7 @@ function DraftCard({ children }: { children: React.ReactNode }) {
     >
       <div className="uplabel mb-3 flex items-center gap-1.5" style={{ fontSize: 10 }}>
         <Sparkles size={11} style={{ color: "#9C6D00" }} />
-        Spot&apos;s draft
+        {label}
       </div>
       {children}
     </div>
@@ -123,7 +216,9 @@ function Field({
 }) {
   return (
     <div className="mb-3">
-      <div className="text-[10.5px] uppercase tracking-[0.4px] text-text-tertiary mb-1">{label}</div>
+      <div className="text-[10.5px] uppercase tracking-[0.4px] text-text-tertiary mb-1">
+        {label}
+      </div>
       {long ? (
         <textarea
           value={value}
@@ -144,6 +239,311 @@ function Field({
     </div>
   );
 }
+
+// ─── Persona card (with Want / Pain / Solution) ─────────────────────
+
+function PersonaAvatar({ id, size = 40 }: { id: string; size?: number }) {
+  const hue = (id.split("").reduce((s, c) => s + c.charCodeAt(0), 0) * 47) % 360;
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.round(size * 0.22),
+        background: `linear-gradient(135deg, oklch(0.88 0.06 ${hue}) 0%, oklch(0.72 0.09 ${(hue + 50) % 360}) 100%)`,
+        position: "relative",
+        flexShrink: 0,
+      }}
+    >
+      <svg viewBox="0 0 40 40" width={size} height={size} style={{ position: "absolute", inset: 0 }}>
+        <circle cx="20" cy="15" r="5" fill="rgba(0,0,0,0.35)" />
+        <path d="M10 34c0-6 5-9 10-9s10 3 10 9z" fill="rgba(0,0,0,0.35)" />
+      </svg>
+    </div>
+  );
+}
+
+function PersonaCardLive({
+  p,
+  onToggleApprove,
+  onEditField,
+}: {
+  p: PersonaDraft;
+  onToggleApprove: () => void;
+  onEditField: (key: keyof PersonaDraft, value: string) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const FieldChip = ({
+    label,
+    tone,
+    fieldKey,
+  }: {
+    label: string;
+    tone: "neutral" | "warn" | "ok";
+    fieldKey: "want" | "painPoint" | "solution";
+  }) => {
+    const dot = tone === "warn" ? "#DC2626" : tone === "ok" ? "#15803D" : "#9B9B9B";
+    const editing = editingId === fieldKey;
+    return (
+      <div className="px-3 py-2.5 border-r last:border-r-0 border-border-subtle min-w-0">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dot }} />
+          <span className="uplabel" style={{ fontSize: 9.5 }}>
+            {label}
+          </span>
+        </div>
+        {editing ? (
+          <textarea
+            autoFocus
+            value={p[fieldKey] as string}
+            onBlur={() => setEditingId(null)}
+            onChange={(e) => onEditField(fieldKey, e.target.value)}
+            rows={3}
+            className="w-full text-[12px] outline-none rounded px-1.5 py-1 resize-none"
+            style={{ border: "1px solid #C9A86A", background: "#FFFEF8" }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditingId(fieldKey)}
+            className="text-[12px] leading-[1.4] text-left w-full hover:bg-[#FFF7E0] rounded px-1 py-0.5 -mx-1"
+            title="Click to edit"
+          >
+            {p[fieldKey] as string}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="card-base bg-white overflow-hidden fadeUp"
+      style={{ borderColor: p.approved ? "#BBF7D0" : "var(--border)" }}
+    >
+      {/* Header */}
+      <div className="flex items-start gap-3 px-4 py-3 border-b border-border-subtle">
+        <PersonaAvatar id={p.id} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[14.5px] font-semibold leading-tight">{p.name}</span>
+            <span className="text-[12px] text-text-secondary">, {p.age}</span>
+            <span className="pill" style={{ fontSize: 10 }}>
+              {p.share}% mix
+            </span>
+          </div>
+          <div className="text-[11.5px] text-text-tertiary mt-0.5">{p.role}</div>
+          <div className="text-[10.5px] text-text-tertiary mt-0.5">
+            {p.hhi} · {p.geo}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onToggleApprove}
+          className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] flex-shrink-0 ${
+            p.approved
+              ? "bg-[#F0FDF4] border border-[#BBF7D0] text-[#15803D]"
+              : "bg-white border border-border text-text-secondary"
+          }`}
+        >
+          <Check size={11} /> {p.approved ? "Approved" : "Approve"}
+        </button>
+      </div>
+
+      {/* Want / Pain / Solution triplet */}
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <FieldChip label="Want" tone="neutral" fieldKey="want" />
+        <FieldChip label="Pain point" tone="warn" fieldKey="painPoint" />
+        <FieldChip label="Solution we offer" tone="ok" fieldKey="solution" />
+      </div>
+    </div>
+  );
+}
+
+function PersonaSkeleton() {
+  return (
+    <div className="card-base bg-white overflow-hidden">
+      <div className="flex items-start gap-3 px-4 py-3 border-b border-border-subtle">
+        <div className="skeleton" style={{ width: 40, height: 40, borderRadius: 9 }} />
+        <div className="flex-1">
+          <div className="skeleton" style={{ height: 14, width: "55%", marginBottom: 6 }} />
+          <div className="skeleton" style={{ height: 11, width: "75%" }} />
+        </div>
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="px-3 py-2.5 border-r last:border-r-0 border-border-subtle">
+            <div className="skeleton" style={{ height: 9, width: 50, marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 10, width: "100%", marginBottom: 4 }} />
+            <div className="skeleton" style={{ height: 10, width: "85%", marginBottom: 4 }} />
+            <div className="skeleton" style={{ height: 10, width: "60%" }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Progressive persona reveal — Spot "discovers" personas one by one,
+// each appearing with a skeleton → real card transition.
+function ProgressivePersonas({
+  personas,
+  onChange,
+}: {
+  personas: PersonaDraft[];
+  onChange: (next: PersonaDraft[]) => void;
+}) {
+  const [revealed, setRevealed] = useState(0);
+  const [loadingNext, setLoadingNext] = useState(true);
+
+  useEffect(() => {
+    if (revealed >= personas.length) {
+      setLoadingNext(false);
+      return;
+    }
+    setLoadingNext(true);
+    const t = setTimeout(() => {
+      setRevealed((r) => r + 1);
+    }, revealed === 0 ? 600 : 1100);
+    return () => clearTimeout(t);
+  }, [revealed, personas.length]);
+
+  return (
+    <div className="space-y-3">
+      {personas.slice(0, revealed).map((p, i) => (
+        <PersonaCardLive
+          key={p.id}
+          p={p}
+          onToggleApprove={() => {
+            const next = [...personas];
+            next[i] = { ...p, approved: !p.approved };
+            onChange(next);
+          }}
+          onEditField={(key, value) => {
+            const next = [...personas];
+            next[i] = { ...p, [key]: value } as PersonaDraft;
+            onChange(next);
+          }}
+        />
+      ))}
+      {revealed < personas.length && loadingNext && (
+        <>
+          <div
+            className="flex items-center gap-2.5 px-3 py-2 rounded-[10px] fadeUp"
+            style={{
+              background: "var(--spot-tint)",
+              border: "1px solid var(--spot-stroke)",
+            }}
+          >
+            <SpotMark size={14} />
+            <span className="text-[12px] text-text-secondary">
+              {revealed === 0
+                ? "Reading the brief and recent leads…"
+                : `Drafting persona ${revealed + 1} of ${personas.length}…`}
+            </span>
+            <span className="flex gap-1 ml-auto">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="spot-pulse"
+                  style={{
+                    width: 4,
+                    height: 4,
+                    borderRadius: "50%",
+                    background: "var(--text-2)",
+                    animationDelay: `${i * 0.18}s`,
+                  }}
+                />
+              ))}
+            </span>
+          </div>
+          <PersonaSkeleton />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Media plan summary card ─────────────────────────────────────────
+
+function MediaPlanSummary({ draft }: { draft: Draft }) {
+  const approved = draft.personas.filter((p) => p.approved);
+  // Mock-derive a plan: 1-2 ad sets per approved persona, balanced spend.
+  const weeklyBudget = 35000 * approved.length;
+  const adSetsPerPersona = 2;
+  const adsPerSet = 3;
+  const totalCreativesNeeded = approved.length * adSetsPerPersona * adsPerSet;
+  return (
+    <div className="card-base overflow-hidden">
+      <div
+        className="px-4 py-2.5"
+        style={{
+          background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
+          color: "#FFF",
+        }}
+      >
+        <div className="text-[12px] uppercase tracking-wide font-semibold">Draft media plan</div>
+      </div>
+      <div className="p-4">
+        <div
+          className="grid mb-4"
+          style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}
+        >
+          <div>
+            <div className="uplabel" style={{ fontSize: 10 }}>Personas live</div>
+            <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 600 }}>{approved.length}</div>
+          </div>
+          <div>
+            <div className="uplabel" style={{ fontSize: 10 }}>Ad sets</div>
+            <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 600 }}>{approved.length * adSetsPerPersona}</div>
+          </div>
+          <div>
+            <div className="uplabel" style={{ fontSize: 10 }}>Creatives to make</div>
+            <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 600 }}>{totalCreativesNeeded}</div>
+          </div>
+          <div>
+            <div className="uplabel" style={{ fontSize: 10 }}>Weekly spend</div>
+            <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 600 }}>
+              ₹{(weeklyBudget / 1000).toFixed(0)}K
+            </div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {approved.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-3 px-3 py-2 rounded-[7px]"
+              style={{ background: "var(--bg-page)" }}
+            >
+              <PersonaAvatar id={p.id} size={26} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] font-medium truncate">{p.name}</div>
+                <div className="text-[10.5px] text-text-tertiary truncate">
+                  {adSetsPerPersona} ad sets · {adsPerSet} ads each · ₹{((weeklyBudget / approved.length) / 1000).toFixed(0)}K/wk
+                </div>
+              </div>
+              <span className="pill" style={{ fontSize: 10 }}>To create</span>
+            </div>
+          ))}
+        </div>
+        <div
+          className="mt-4 px-3.5 py-2.5 rounded-[8px] flex items-start gap-2.5"
+          style={{ background: "var(--spot-tint)", border: "1px solid var(--spot-stroke)" }}
+        >
+          <SpotMark size={14} />
+          <div className="text-[12px] leading-[1.5] text-text-secondary">
+            <strong className="text-text-primary">Next:</strong> open the media plan to create
+            ads per persona, review ad set targeting, set up the lead form, and deploy.
+            Nothing goes live until you confirm.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main flow ────────────────────────────────────────────────────────
 
 export function CreateProjectFlow({
   onClose,
@@ -172,29 +572,39 @@ export function CreateProjectFlow({
     }
   }, [stage]);
 
+  const approvedCount = draft.personas.filter((p) => p.approved).length;
+
   return (
     <>
       <div className="scrim" onClick={onClose} />
       <div
-        className="fadeInScale"
         style={{
           position: "fixed",
-          top: "5vh",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "min(960px, 96vw)",
+          inset: 0,
+          zIndex: 100,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          padding: "5vh 16px",
+          pointerEvents: "none",
+        }}
+      >
+      <div
+        className="fadeUp"
+        style={{
+          width: "min(820px, 100%)",
           maxHeight: "90vh",
           background: "#FFF",
           borderRadius: 14,
           boxShadow: "0 24px 80px rgba(0,0,0,0.18)",
-          zIndex: 100,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
+          pointerEvents: "auto",
         }}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border">
+        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border flex-shrink-0">
           <SpotMark size={20} />
           <div className="flex-1 min-w-0">
             <div className="uplabel" style={{ fontSize: 10 }}>
@@ -204,28 +614,41 @@ export function CreateProjectFlow({
               Set up a new project knowledge base
             </div>
           </div>
-          {/* Stage strip */}
-          <div className="flex items-center gap-3 mr-3">
-            {STAGES.map((s, i) => (
-              <div key={s.key} className="flex items-center gap-3">
-                <StagePill stage={s} current={stage} />
-                {i < STAGES.length - 1 && (
-                  <span className="w-4 h-px bg-border" />
-                )}
-              </div>
-            ))}
-          </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-button hover:bg-surface-secondary"
+            className="inline-flex items-center justify-center h-8 w-8 rounded-button hover:bg-surface-secondary flex-shrink-0"
           >
             <X size={15} />
           </button>
         </div>
 
+        {/* Stage strip (own row, scrollable horizontally on narrow) */}
+        <div
+          className="flex items-center gap-4 px-5 py-2.5 border-b border-border-subtle bg-surface-page overflow-x-auto scroll flex-shrink-0"
+        >
+          {STAGES.map((s, i) => (
+            <div key={s.key} className="flex items-center gap-4 flex-shrink-0">
+              <StagePill
+                stage={s}
+                current={stage}
+                onClick={() => {
+                  const idx = STAGES.findIndex((x) => x.key === s.key);
+                  const currentIdx = STAGES.findIndex((x) => x.key === stage);
+                  if (idx <= currentIdx) setStage(s.key);
+                }}
+              />
+              {i < STAGES.length - 1 && <span className="w-6 h-px bg-border" />}
+            </div>
+          ))}
+        </div>
+
         {/* Body */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 scroll" style={{ background: "var(--chat-bg)" }}>
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-5 py-4 scroll"
+          style={{ background: "var(--chat-bg)" }}
+        >
           {stage === "intent" && (
             <>
               <SpotBubble>
@@ -233,11 +656,11 @@ export function CreateProjectFlow({
                 I&apos;ll extract everything I need. You can also paste a URL or fill it in yourself.
               </SpotBubble>
               <DraftCard>
-                <div className="grid grid-cols-3 gap-2 mb-3">
+                <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
                   {[
                     { k: "pdf", label: "Upload PDF", Icon: Upload },
                     { k: "url", label: "Paste URL", Icon: FileText },
-                    { k: "manual", label: "Manual fill", Icon: Sparkles },
+                    { k: "manual", label: "Manual fill", Icon: Edit3 },
                   ].map(({ k, label, Icon }) => (
                     <button
                       key={k}
@@ -250,7 +673,7 @@ export function CreateProjectFlow({
                         borderColor: draft.source === k ? "#1A1A1A" : "var(--border)",
                       }}
                     >
-                      <Icon size={16} />
+                      <Icon size={15} />
                       <span className="text-[12.5px] font-medium">{label}</span>
                     </button>
                   ))}
@@ -272,14 +695,13 @@ export function CreateProjectFlow({
           {stage === "brief" && (
             <>
               <SpotBubble>
-                Pulled from <strong>{draft.sourceLabel}</strong>. Click any value to edit, or accept
-                and move on.
+                Pulled from <strong>{draft.sourceLabel}</strong>. Tap any value to edit.
               </SpotBubble>
-              <DraftCard>
+              <DraftCard label="Extracted brief">
                 <Field label="Project name" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
                 <Field label="RERA" value={draft.rera} onChange={(v) => setDraft({ ...draft, rera: v })} />
                 <Field label="Micromarket" value={draft.micromarket} onChange={(v) => setDraft({ ...draft, micromarket: v })} />
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
                   <Field label="Typology" value={draft.typology} onChange={(v) => setDraft({ ...draft, typology: v })} />
                   <Field label="Price band" value={draft.priceBand} onChange={(v) => setDraft({ ...draft, priceBand: v })} />
                   <Field label="Possession" value={draft.possession} onChange={(v) => setDraft({ ...draft, possession: v })} />
@@ -299,13 +721,13 @@ export function CreateProjectFlow({
           {stage === "goal" && (
             <>
               <SpotBubble>
-                Most luxury Bengaluru launches at this price band convert ~3% of leads to verified.
-                I&apos;ve drafted <strong>{draft.goalTarget} verified leads</strong> over{" "}
-                <strong>{draft.goalWindow}</strong> — feel free to dial it.
+                Similar luxury Pune launches convert ~3% of leads to verified. I&apos;ve drafted{" "}
+                <strong>{draft.goalTarget} verified leads</strong> over{" "}
+                <strong>{draft.goalWindow}</strong>.
               </SpotBubble>
-              <DraftCard>
+              <DraftCard label="Goal proposal">
                 <div className="text-[10.5px] uppercase tracking-[0.4px] text-text-tertiary mb-2">Goal kind</div>
-                <div className="grid grid-cols-3 gap-2 mb-4">
+                <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
                   {(["leads", "verified", "qualified"] as const).map((k) => (
                     <button
                       key={k}
@@ -327,7 +749,7 @@ export function CreateProjectFlow({
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
                   <Field label="Target count" value={draft.goalTarget} onChange={(v) => setDraft({ ...draft, goalTarget: v })} />
                   <Field label="Window" value={draft.goalWindow} onChange={(v) => setDraft({ ...draft, goalWindow: v })} />
                 </div>
@@ -346,108 +768,40 @@ export function CreateProjectFlow({
           {stage === "personas" && (
             <>
               <SpotBubble>
-                I borrowed 3 personas from your existing Bengaluru playbooks. Approve what fits, drop
-                what doesn&apos;t, and we can add more via the project page later.
+                Drafting personas from your brief, the goal you set, and what&apos;s worked for
+                similar Pune luxury launches. Each one uses a <strong>Want / Pain / Solution</strong>{" "}
+                frame — Pain and Solution stay fixed across creative; only hook and CTA flex per ad.
               </SpotBubble>
-              <DraftCard>
-                <div className="space-y-2">
-                  {draft.personas.map((p, i) => (
-                    <div
-                      key={i}
-                      className="card-base bg-white flex items-center gap-3 p-3"
-                    >
-                      <div
-                        className="flex items-center justify-center text-[10px] font-semibold flex-shrink-0"
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: "50%",
-                          background: `linear-gradient(135deg, oklch(0.85 0.06 ${i * 80}) 0%, oklch(0.72 0.08 ${i * 80 + 40}) 100%)`,
-                          color: "rgba(0,0,0,0.55)",
-                        }}
-                      >
-                        {p.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-medium">{p.name}</div>
-                        <div className="text-[11px] text-text-tertiary">{p.role}</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = [...draft.personas];
-                          next[i] = { ...next[i], approved: !next[i].approved };
-                          setDraft({ ...draft, personas: next });
-                        }}
-                        className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] ${
-                          p.approved
-                            ? "bg-[#F0FDF4] border border-[#BBF7D0] text-[#15803D]"
-                            : "bg-white border border-border text-text-secondary"
-                        }`}
-                      >
-                        <Check size={11} /> {p.approved ? "Approved" : "Approve"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </DraftCard>
-              <div className="flex justify-between">
+              <ProgressivePersonas
+                personas={draft.personas}
+                onChange={(next) => setDraft({ ...draft, personas: next })}
+              />
+              <div className="flex justify-between mt-4">
                 <button type="button" className="inline-flex items-center h-8 px-3 rounded-button border border-border bg-white text-[12.5px]" onClick={prev}>
                   Back
                 </button>
-                <button type="button" className="apply-btn" onClick={next}>
-                  Approve {draft.personas.filter((p) => p.approved).length} &amp; continue →
+                <button
+                  type="button"
+                  className="apply-btn"
+                  onClick={next}
+                  disabled={approvedCount === 0}
+                >
+                  Approve {approvedCount} &amp; draft media plan →
                 </button>
               </div>
             </>
           )}
 
-          {stage === "review" && (
+          {stage === "plan" && (
             <>
               <SpotBubble>
-                <strong>Here&apos;s what gets created.</strong> When you confirm I&apos;ll save the
-                project and you&apos;ll land on its detail page. You can launch campaigns from there.
+                <strong>Project is ready.</strong> I&apos;ve drafted a starting media plan for your{" "}
+                {approvedCount} approved persona{approvedCount === 1 ? "" : "s"}. Nothing is live
+                yet — open the plan to create ads per persona, review ad-set targeting, set up the
+                lead form, and deploy.
               </SpotBubble>
-              <div
-                className="rounded-[12px] overflow-hidden mb-3"
-                style={{
-                  background: "linear-gradient(135deg, #FBF7FF 0%, #FFF 60%)",
-                  border: "1px solid #C8A8FF",
-                }}
-              >
-                <div
-                  className="px-4 py-2.5"
-                  style={{
-                    background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
-                    color: "#FFF",
-                  }}
-                >
-                  <div className="text-[12px] uppercase tracking-wide font-semibold">Review &amp; deploy</div>
-                </div>
-                <div className="p-4 space-y-2.5">
-                  {[
-                    { label: "Project name", value: draft.name },
-                    { label: "Micromarket", value: draft.micromarket },
-                    { label: "Typology · Price", value: `${draft.typology} · ${draft.priceBand}` },
-                    {
-                      label: "Goal",
-                      value: `${draft.goalTarget} ${draft.goalKind} leads in ${draft.goalWindow}`,
-                    },
-                    {
-                      label: "Personas",
-                      value: `${draft.personas.filter((p) => p.approved).length} approved · ${draft.personas.length - draft.personas.filter((p) => p.approved).length} on hold`,
-                    },
-                  ].map((l) => (
-                    <div key={l.label} className="grid" style={{ gridTemplateColumns: "140px 1fr", gap: 12 }}>
-                      <div className="uplabel" style={{ fontSize: 10 }}>
-                        {l.label}
-                      </div>
-                      <div className="text-[12.5px]">{l.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex justify-between">
+              <MediaPlanSummary draft={draft} />
+              <div className="flex justify-between mt-4">
                 <button type="button" className="inline-flex items-center h-8 px-3 rounded-button border border-border bg-white text-[12.5px]" onClick={prev}>
                   Back
                 </button>
@@ -455,23 +809,24 @@ export function CreateProjectFlow({
                   type="button"
                   className="apply-btn"
                   style={{
-                    height: 32,
+                    height: 34,
                     fontSize: 13,
-                    padding: "0 14px",
+                    padding: "0 16px",
                     background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
                   }}
                   onClick={() => {
-                    showToast("Project draft created");
-                    // For MVP, route the user to the closest seed project so the page renders.
+                    showToast("Project created — opening media plan");
+                    // For MVP, route to a seed project's deploy page.
                     onComplete("godrej-aristocrat");
                   }}
                 >
-                  <Check size={13} /> Create project
+                  <Play size={13} /> Open media plan to deploy
                 </button>
               </div>
             </>
           )}
         </div>
+      </div>
       </div>
     </>
   );
