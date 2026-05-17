@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { X, Check, Mail, Send, Globe, AlertTriangle } from "lucide-react";
+import { X, Check, Mail, Send, AlertTriangle } from "lucide-react";
+import { RevspotLogo } from "@/components/layout/revspot-logo";
 import { useAccessibleWorkspaces, useCurrentUser } from "@/lib/workspace-store";
 import { useInviteStore, parseEmails } from "@/lib/invite-data";
 import { useSpotStore } from "@/lib/spot/store";
@@ -183,7 +184,7 @@ export function InviteUserModal({
                     border: "1px solid var(--spot-stroke)",
                   }}
                 >
-                  <Globe size={14} />
+                  <RevspotLogo size={16} />
                   <span className="text-[12.5px]">
                     All {accessible.length} workspaces · cross-workspace dashboard
                   </span>

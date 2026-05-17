@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowUpRight, ChevronRight, Globe, Users, TrendingUp, TrendingDown, UserPlus, Clock } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Users, TrendingUp, TrendingDown, UserPlus, Clock } from "lucide-react";
+import { RevspotLogo } from "@/components/layout/revspot-logo";
 import {
   WORKSPACES,
   type Workspace,
@@ -223,7 +224,7 @@ export default function AdminDashboardPage() {
       <div className="flex items-end justify-between mb-5">
         <div>
           <div className="text-[12px] text-text-secondary mb-1 flex items-center gap-1.5">
-            <Globe size={11} /> All workspaces
+            <RevspotLogo size={13} /> All workspaces
           </div>
           <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Portfolio overview</h1>
           <div className="text-[12.5px] text-text-secondary mt-1">

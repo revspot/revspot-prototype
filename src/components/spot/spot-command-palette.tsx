@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Search, Folder, Monitor, LayoutGrid, Globe } from "lucide-react";
+import { ArrowRight, Search, Folder, Monitor, LayoutGrid } from "lucide-react";
 import { useSpotStore } from "@/lib/spot/store";
 import { SpotMark } from "./spot-mark";
 import { projectsList } from "@/lib/project-data";
 import { useAccessibleWorkspaces, useCurrentUser, useWorkspaceStore } from "@/lib/workspace-store";
+import { RevspotLogo } from "@/components/layout/revspot-logo";
 
 type Item =
   | { id: string; kind: "ask"; text: string; scope?: string; custom?: boolean }
@@ -32,7 +33,7 @@ function buildNavSections(args: {
     kind: "workspace" as const,
     text: w.name,
     target: w.id,
-    icon: Globe,
+    icon: Folder,
     scope: w.region,
   }));
   const sections: Section[] = [
@@ -57,7 +58,7 @@ function buildNavSections(args: {
                 kind: "workspace" as const,
                 text: "All workspaces",
                 target: "all",
-                icon: Globe,
+                icon: Folder,
                 scope: "Admin dashboard",
               },
             ]
@@ -217,7 +218,8 @@ export function SpotCommandPalette() {
               {s.items.map((it) => {
                 const idx = cursor++;
                 const active = idx === sel;
-                const Icon = it.kind === "nav" ? it.icon : null;
+                const Icon = it.kind === "nav" || it.kind === "workspace" ? it.icon : null;
+                const isAllWorkspaces = it.kind === "workspace" && it.target === "all";
                 return (
                   <button
                     key={it.id}
@@ -231,6 +233,8 @@ export function SpotCommandPalette() {
                   >
                     {it.kind === "ask" ? (
                       <SpotMark size={14} />
+                    ) : isAllWorkspaces ? (
+                      <RevspotLogo size={16} />
                     ) : Icon ? (
                       <Icon size={14} className="text-text-secondary" />
                     ) : (

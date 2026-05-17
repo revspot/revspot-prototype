@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronsUpDown, Globe, Settings as SettingsIcon, UserPlus } from "lucide-react";
+import { Check, ChevronsUpDown, Settings as SettingsIcon, UserPlus } from "lucide-react";
 import { InviteUserModal } from "@/components/invite/invite-user-modal";
+import { RevspotLogo } from "@/components/layout/revspot-logo";
 import {
   useAccessibleWorkspaces,
   useCurrentScope,
@@ -38,22 +39,21 @@ function WorkspaceMark({ ws, size = 26 }: { ws: Workspace; size?: number }) {
 }
 
 function AllMark({ size = 26 }: { size?: number }) {
+  // Revspot R brand mark — used as the "All workspaces" indicator since
+  // crossing workspaces means operating at org level.
   return (
-    <div
+    <span
       style={{
-        width: size,
-        height: size,
-        borderRadius: Math.round(size * 0.27),
-        background: "linear-gradient(135deg, #1A1A1A 0%, #4A4A4A 100%)",
-        color: "#FAFAF8",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
+        width: size,
+        height: size,
       }}
     >
-      <Globe size={Math.round(size * 0.55)} />
-    </div>
+      <RevspotLogo size={size} />
+    </span>
   );
 }
 
