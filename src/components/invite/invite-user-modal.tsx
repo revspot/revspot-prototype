@@ -198,26 +198,12 @@ export function InviteUserModal({
                         key={w.id}
                         type="button"
                         onClick={() => toggleWs(w.id)}
-                        className="card-base hover-row w-full text-left flex items-center gap-3 px-3 py-2.5"
+                        className="card-base hover-row w-full text-left flex items-center gap-3 px-3.5 py-2.5"
                         style={{
                           borderColor: active ? "#1A1A1A" : "var(--border)",
                           background: active ? "var(--bg-page)" : "#FFF",
                         }}
                       >
-                        <div
-                          className="flex items-center justify-center flex-shrink-0"
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 7,
-                            background: `linear-gradient(135deg, oklch(0.88 0.06 ${w.hue}) 0%, oklch(0.62 0.10 ${(w.hue + 50) % 360}) 100%)`,
-                            color: "rgba(0,0,0,0.6)",
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}
-                        >
-                          {w.shortCode}
-                        </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12.5px] font-medium leading-tight">
                             {w.name}

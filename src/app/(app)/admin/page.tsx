@@ -79,21 +79,6 @@ function WorkspaceRow({ ws }: { ws: Workspace }) {
       }}
       className="card-base hover-row w-full text-left p-4 flex items-start gap-4"
     >
-      <div
-        className="flex-shrink-0 flex items-center justify-center"
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 10,
-          background: `linear-gradient(135deg, oklch(0.88 0.06 ${ws.hue}) 0%, oklch(0.62 0.10 ${(ws.hue + 50) % 360}) 100%)`,
-          color: "rgba(0,0,0,0.6)",
-          fontSize: 16,
-          fontWeight: 700,
-          letterSpacing: "-0.02em",
-        }}
-      >
-        {ws.shortCode}
-      </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5 flex-wrap">
           <span className="text-[15px] font-semibold leading-tight">{ws.name}</span>

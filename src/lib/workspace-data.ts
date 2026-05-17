@@ -5,8 +5,6 @@ export type Workspace = {
   id: string;
   name: string;
   region: string;
-  shortCode: string;
-  hue: number;
   memberCount: number;
 };
 
@@ -15,24 +13,18 @@ export const WORKSPACES: Workspace[] = [
     id: "ws-south",
     name: "Godrej South",
     region: "Bangalore · Hyderabad",
-    shortCode: "GS",
-    hue: 145,
     memberCount: 8,
   },
   {
     id: "ws-ncr",
     name: "Godrej NCR",
     region: "Delhi · Gurugram",
-    shortCode: "GN",
-    hue: 30,
     memberCount: 5,
   },
   {
     id: "ws-mmr",
     name: "Godrej MMR",
     region: "Mumbai · Pune",
-    shortCode: "GM",
-    hue: 220,
     memberCount: 9,
   },
 ];

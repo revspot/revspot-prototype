@@ -11,32 +11,8 @@ import {
   useCurrentUser,
   useWorkspaceStore,
 } from "@/lib/workspace-store";
-import { getWorkspace, type Workspace } from "@/lib/workspace-data";
+import { getWorkspace } from "@/lib/workspace-data";
 import { projectsForWorkspace } from "@/lib/project-data";
-
-function WorkspaceMark({ ws, size = 26 }: { ws: Workspace; size?: number }) {
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: Math.round(size * 0.27),
-        background: `linear-gradient(135deg, oklch(0.88 0.06 ${ws.hue}) 0%, oklch(0.62 0.10 ${(ws.hue + 50) % 360}) 100%)`,
-        color: "rgba(0,0,0,0.6)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: Math.round(size * 0.42),
-        fontWeight: 700,
-        letterSpacing: "-0.02em",
-        flexShrink: 0,
-        boxShadow: "inset 0 0 0 0.5px rgba(255,255,255,0.5)",
-      }}
-    >
-      {ws.shortCode}
-    </div>
-  );
-}
 
 function AllMark({ size = 26 }: { size?: number }) {
   // Revspot R brand mark — used as the "All workspaces" indicator since
@@ -96,11 +72,9 @@ export function WorkspaceSwitcher() {
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-2 px-2 py-2 rounded-[8px] hover:bg-surface-secondary transition-colors text-left"
       >
-        {/* Revspot R is always present — brand mark for the product. */}
+        {/* Revspot R is the only mark in the trigger — workspace identity
+            is carried by the name + region text. */}
         <RevspotLogo size={22} />
-        {/* When scoped to a specific workspace, show its color tile too;
-            when scoped to "all", the R is the only mark (no double R). */}
-        {!isAll && currentWs && <WorkspaceMark ws={currentWs} size={22} />}
         <div className="flex-1 min-w-0">
           <div className="text-[13.5px] font-semibold text-text-primary leading-tight truncate">
             {isAll ? "All workspaces" : currentWs?.name}
@@ -171,10 +145,9 @@ export function WorkspaceSwitcher() {
                   setOpen(false);
                   router.push("/projects");
                 }}
-                className="w-full flex items-center gap-2.5 px-2 py-2 rounded-[7px] hover:bg-surface-page text-left"
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[7px] hover:bg-surface-page text-left"
                 style={{ background: active ? "var(--bg-page)" : "transparent" }}
               >
-                <WorkspaceMark ws={w} size={24} />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12.5px] font-semibold truncate">{w.name}</div>
                   <div className="text-[10.5px] text-text-tertiary truncate">
