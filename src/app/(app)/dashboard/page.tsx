@@ -8,11 +8,10 @@ import { MetricCard } from "@/components/dashboard/metric-card";
 import { MetricChart } from "@/components/shared/metric-chart";
 import type { MetricChartDef, MetricOption } from "@/components/shared/metric-chart";
 import { Insights } from "@/components/dashboard/insights";
-import { CampaignTable } from "@/components/dashboard/campaign-table";
+import { ProjectPerformanceTable } from "@/components/dashboard/project-performance-table";
 import { RecentlyQualified } from "@/components/dashboard/recently-qualified";
 import { VoiceAgentPerformance } from "@/components/dashboard/voice-agent-performance";
 import {
-  campaignPerformance,
   voiceAgentMetrics,
   disqualificationReasons,
 } from "@/lib/mock-data";
@@ -293,7 +292,7 @@ export default function DashboardPage() {
 
       {/* Two column: Campaign table + Recently qualified leads */}
       <motion.div variants={fadeUp} className="grid grid-cols-[3fr_2fr] gap-5">
-        <CampaignTable campaigns={campaignPerformance} />
+        <ProjectPerformanceTable />
         <RecentlyQualified />
       </motion.div>
       </>
