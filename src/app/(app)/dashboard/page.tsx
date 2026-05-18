@@ -19,7 +19,7 @@ import { GettingStartedChecklist } from "@/components/dashboard/getting-started"
 import { IllustrationCampaigns, IllustrationAgents, IllustrationProjects, IllustrationLeads } from "@/components/illustrations/empty-states";
 import { useDemoMode } from "@/lib/demo-mode";
 import { useAppStore } from "@/lib/store";
-import { useCurrentWorkspaceLabel } from "@/lib/workspace-store";
+import { useCurrentScope, useCurrentWorkspaceLabel } from "@/lib/workspace-store";
 
 const stagger: Variants = {
   hidden: {},
@@ -149,6 +149,8 @@ export default function DashboardPage() {
   const projects = useAppStore((s) => s.projects);
   const hasProjects = projects.length > 0;
   const wsLabel = useCurrentWorkspaceLabel();
+  const scope = useCurrentScope();
+  const isAllWorkspaces = scope.kind === "all";
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState("30");
 
@@ -174,10 +176,20 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-page-title text-text-primary">Dashboard</h1>
         </div>
-        <DateRangeSelector onChange={setDateRange} />
+        {/* Date range only applies to the per-workspace metrics; the
+            all-workspaces rollup table is point-in-time. */}
+        {!isAllWorkspaces && <DateRangeSelector onChange={setDateRange} />}
       </motion.div>
 
-      {isEmpty ? (
+      {isAllWorkspaces ? (
+        /* All-workspaces view: only the workspace performance rollup.
+           Per spec, no other metric cards / insights / voice agent /
+           recently qualified — drill into a single workspace to see
+           those. */
+        <motion.div variants={fadeUp}>
+          <ProjectPerformanceTable />
+        </motion.div>
+      ) : isEmpty ? (
         <>
           {/* Getting Started Checklist — only in empty state */}
           <motion.div variants={fadeUp} className="mb-5">
