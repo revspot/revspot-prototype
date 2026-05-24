@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   RefreshCw,
@@ -13,9 +13,10 @@ import {
   X,
   Loader2,
   Plus,
+  Upload as UploadIcon,
 } from "lucide-react";
 import type { Angle, Creative, Persona } from "@/lib/project-data";
-import { mutateRuntimeProject } from "@/lib/project-data";
+import { mutateRuntimeProject, creativeAssetState } from "@/lib/project-data";
 import {
   getConcepts,
   pickHeadlineSize,
@@ -23,6 +24,7 @@ import {
   conceptAggregateCpvl,
   type DerivedConcept,
 } from "./persona-hierarchy";
+import { MetaPreview } from "./meta-preview";
 import { LaunchCreativeFlow } from "./launch-creative-flow";
 
 /**
@@ -176,18 +178,26 @@ export function AngleRow({
           )}
 
           {/* Bottom action bar */}
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => onDraftConcept?.(angle.id)}
-              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] text-text-secondary hover:text-text-primary"
-              style={{
-                border: "1px dashed var(--border)",
-                background: "transparent",
-              }}
-            >
-              <Plus size={11} /> Draft another concept with Spot
-            </button>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => onDraftConcept?.(angle.id)}
+                title="Spot drafts a static concept (image). Video uploads still go through Upload."
+                className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] text-text-secondary hover:text-text-primary"
+                style={{
+                  border: "1px dashed var(--border)",
+                  background: "transparent",
+                }}
+              >
+                <Plus size={11} /> Draft static with Spot
+              </button>
+              <UploadConceptButton
+                projectId={projectId}
+                personaId={persona.id}
+                angle={angle}
+              />
+            </div>
             <button
               type="button"
               onClick={() => setEditing(true)}
@@ -200,6 +210,125 @@ export function AngleRow({
       )}
     </div>
   );
+}
+
+// ─── Upload concept (handles videos Spot can't generate) ───────────────
+
+function UploadConceptButton({
+  projectId,
+  personaId,
+  angle,
+}: {
+  projectId: string;
+  personaId: string;
+  angle: Angle;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFiles = (files: FileList | null) => {
+    if (!files) return;
+    const arr = Array.from(files);
+    if (arr.length === 0) return;
+
+    mutateRuntimeProject(projectId, (p) => {
+      const persona2 = p.personas.find((pp) => pp.id === personaId);
+      const a = persona2?.angles.find((aa) => aa.id === angle.id);
+      if (!a) return;
+      arr.forEach((file, i) => {
+        const isVideo = file.type.startsWith("video/");
+        const blobUrl = URL.createObjectURL(file);
+        const baseId = `${angle.id}-up-${Date.now().toString(36)}-${i}`;
+        // Build sized shells around this asset. The user uploaded one
+        // file but we treat it as the canonical asset for *every* size
+        // of that kind — the prototype can extend with per-size uploads
+        // later (and the size drawer's inline Upload button already
+        // supports replacing individual sizes).
+        const sizes = isVideo
+          ? videoSeedWithAsset(baseId, blobUrl)
+          : staticSeedWithAsset(baseId, blobUrl);
+        a.concept.creatives.push(...sizes);
+        if (a.status === "draft" && a.concept.creatives.length > 0) {
+          a.status = "live";
+        }
+      });
+    });
+  };
+
+  return (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+        style={{ display: "none" }}
+      />
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        title="Upload an image or video — required for video concepts since Spot only generates static"
+        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] font-medium"
+        style={{
+          background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
+          color: "#FFF",
+          border: "1px solid transparent",
+        }}
+      >
+        <UploadIcon size={11} /> Upload concept
+      </button>
+    </>
+  );
+}
+
+// Seed helpers — variants of the workspace ones that pre-populate the
+// asset URL (uploaded path). Kept here so the upload flow is
+// self-contained in this file.
+function staticSeedWithAsset(baseId: string, assetUrl: string): Creative[] {
+  return [
+    makeSizedAsset(`${baseId}-s11`, "1:1", "Meta Feed", "image", assetUrl),
+    makeSizedAsset(`${baseId}-s45`, "4:5", "Meta Feed", "image", assetUrl),
+    makeSizedAsset(`${baseId}-s916`, "9:16", "Meta Stories", "image", assetUrl),
+  ];
+}
+function videoSeedWithAsset(baseId: string, assetUrl: string): Creative[] {
+  return [
+    makeSizedAsset(`${baseId}-v916`, "9:16", "Meta Reels", "video", assetUrl),
+    makeSizedAsset(`${baseId}-v11`, "1:1", "Meta Feed", "video", assetUrl),
+  ];
+}
+function makeSizedAsset(
+  id: string,
+  format: Creative["format"],
+  surface: string,
+  kind: Creative["kind"],
+  assetUrl: string,
+): Creative {
+  const placeholderHue =
+    (id.split("").reduce((s, c) => s + c.charCodeAt(0), 0) * 47) % 360;
+  return {
+    id,
+    format,
+    surface,
+    platform: "Meta",
+    kind,
+    assetUrl,
+    assetSource: "uploaded",
+    placeholderHue,
+    spend: null,
+    impressions: null,
+    leads: null,
+    verified: null,
+    qualified: null,
+    ctr: null,
+    cvr: null,
+    cpl: null,
+    cpvl: null,
+    cpql: null,
+  };
 }
 
 // ─── Hook/CTA: inline edit ──────────────────────────────────────────────
@@ -400,7 +529,7 @@ function ConceptRow({
       lines: [
         `Reading "${angle.name}" hook & CTA`,
         isVideo
-          ? "Drafting two video sizes (9:16, 1:1)"
+          ? "Reshuffling video frames (asset stays — Spot can't generate video)"
           : "Drafting three static sizes (1:1, 4:5, 9:16)",
         "Saving to your library",
       ],
@@ -542,77 +671,387 @@ function ConceptRow({
 
       {/* Sizes drawer */}
       {sizesOpen && regenStage.phase === "idle" && concept.sizes.length > 0 && (
-        <div
-          className="px-3 pb-3 space-y-1.5"
-          style={{ borderTop: "1px solid var(--border-subtle)" }}
-        >
-          <div className="text-[10.5px] text-text-tertiary pt-2 pb-0.5">
-            {isVideo
-              ? "Video sizes · FFR (frame 1) → Hook (3s) → Hold (complete)"
-              : "Static sizes · CTR · CVR · CPVL"}
-          </div>
+        <SizesDrawer
+          projectId={projectId}
+          persona={persona}
+          angle={angle}
+          concept={concept}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Sizes drawer: preview grid + Meta preview on click ────────────────
+
+function SizesDrawer({
+  projectId,
+  persona,
+  angle,
+  concept,
+}: {
+  projectId: string;
+  persona: Persona;
+  angle: Angle;
+  concept: DerivedConcept;
+}) {
+  const isVideo = concept.kind === "video";
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  // Which size is open in the full Meta preview. Defaults to the first one.
+  const [openSizeId, setOpenSizeId] = useState<string | null>(
+    concept.sizes[0]?.id ?? null,
+  );
+
+  const triggerUpload = (creativeId: string) => {
+    setUploadingFor(creativeId);
+    fileRef.current?.click();
+  };
+
+  const handleFile = (files: FileList | null) => {
+    if (!files || !uploadingFor) return;
+    const file = files[0];
+    if (!file) return;
+    const blobUrl = URL.createObjectURL(file);
+    mutateRuntimeProject(projectId, (p) => {
+      const persona2 = p.personas.find((pp) => pp.id === persona.id);
+      const a = persona2?.angles.find((aa) => aa.id === angle.id);
+      const target = a?.concept.creatives.find((c) => c.id === uploadingFor);
+      if (!target) return;
+      target.assetUrl = blobUrl;
+      target.assetSource = "uploaded";
+    });
+    setUploadingFor(null);
+  };
+
+  const openCreative =
+    concept.sizes.find((s) => s.id === openSizeId) ?? concept.sizes[0];
+
+  return (
+    <div
+      className="px-3 pb-3 space-y-3"
+      style={{ borderTop: "1px solid var(--border-subtle)" }}
+    >
+      <input
+        ref={fileRef}
+        type="file"
+        accept={isVideo ? "video/*" : "image/*"}
+        onChange={(e) => {
+          handleFile(e.target.files);
+          e.target.value = "";
+        }}
+        style={{ display: "none" }}
+      />
+
+      <div className="text-[10.5px] text-text-tertiary pt-2 pb-0.5">
+        {isVideo
+          ? "Click a size to see its full Meta preview · FFR (frame 1) → Hook (3s) → Hold (complete)"
+          : "Click a size to see its full Meta preview · CTR · CVR · CPVL"}
+      </div>
+
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)" }}
+      >
+        {/* Left: list of size tiles with preview thumbs + metrics */}
+        <div className="space-y-2 min-w-0">
           {concept.sizes.map((c) => (
-            <SizeRow key={c.id} c={c} kind={concept.kind} />
+            <SizeTile
+              key={c.id}
+              c={c}
+              kind={concept.kind}
+              active={c.id === openSizeId}
+              onSelect={() => setOpenSizeId(c.id)}
+              onUpload={() => triggerUpload(c.id)}
+            />
           ))}
+        </div>
+
+        {/* Right: full Meta-style preview of the active size */}
+        <div className="min-w-0">
+          <div
+            className="uplabel mb-1.5"
+            style={{ fontSize: 9.5, color: "var(--text-tertiary)" }}
+          >
+            Meta preview · {openCreative?.format ?? "—"} · {openCreative?.surface ?? "—"}
+          </div>
+          {openCreative && (
+            <MetaPreview
+              creative={openCreative}
+              persona={persona}
+              angle={angle}
+              onUpload={() => triggerUpload(openCreative.id)}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Size tile (preview thumb + metrics + state) ────────────────────────
+
+function SizeTile({
+  c,
+  kind,
+  active,
+  onSelect,
+  onUpload,
+}: {
+  c: Creative;
+  kind: "static" | "video";
+  active: boolean;
+  onSelect: () => void;
+  onUpload: () => void;
+}) {
+  const state = creativeAssetState(c);
+  const isWinner = c.tag === "winner";
+  const bg =
+    isWinner
+      ? "#F0FDF4"
+      : active
+        ? "var(--bg-page)"
+        : "#FFF";
+  const border = active
+    ? "#1A1A1A"
+    : isWinner
+      ? "#BBF7D0"
+      : "var(--border-subtle)";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="w-full text-left flex items-stretch gap-3 px-2.5 py-2 rounded-[8px] transition-shadow"
+      style={{
+        background: bg,
+        border: `1.5px solid ${border}`,
+        boxShadow: active ? "0 4px 10px rgba(0,0,0,0.04)" : "none",
+      }}
+    >
+      {/* Preview thumb */}
+      <SizeThumb creative={c} state={state} />
+
+      <div className="flex-1 min-w-0 flex flex-col justify-between">
+        <div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[12px] font-semibold leading-tight">
+              {c.format}
+            </span>
+            <span className="text-[10px] text-text-tertiary">{c.surface}</span>
+            <StateBadge state={state} />
+            {isWinner && (
+              <span
+                className="inline-flex items-center gap-0.5 text-white uppercase"
+                style={{
+                  background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+                  fontSize: 9,
+                  fontWeight: 700,
+                  padding: "1.5px 5px",
+                  borderRadius: 4,
+                  letterSpacing: 0.3,
+                }}
+              >
+                <Star size={8} strokeWidth={3} /> Winner
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Metrics — only when live; shell + ready get a state hint */}
+        {state === "live" ? (
+          <div className="flex items-center gap-2 flex-wrap mt-1">
+            {kind === "video" && (
+              <>
+                <Metric label="FFR" v={c.firstFrameRetention} unit="pct" good={70} fair={50} />
+                <Metric label="Hook" v={c.hookRate} unit="pct" good={40} fair={25} />
+                <Metric label="Hold" v={c.holdRate} unit="pct" good={25} fair={15} />
+              </>
+            )}
+            <Metric label="CTR" v={c.ctr} unit="pct" good={1.5} fair={1.0} />
+            <Metric label="CVR" v={c.cvr} unit="pct" good={20} fair={10} />
+            <Metric label="CPVL" v={c.cpvl} unit="currency" />
+          </div>
+        ) : (
+          <div className="mt-1 flex items-center gap-2">
+            <div className="text-[10.5px] text-text-tertiary italic flex-1 truncate">
+              {state === "shell"
+                ? `No ${kind === "video" ? "video" : "image"} uploaded yet`
+                : "Asset ready · not in a campaign yet"}
+            </div>
+            {state === "shell" && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpload();
+                }}
+                className="inline-flex items-center gap-1 h-6 px-2 rounded-button text-[10.5px] font-medium"
+                style={{
+                  background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
+                  color: "#FFF",
+                  border: "1px solid transparent",
+                }}
+              >
+                <UploadIcon size={9} /> Upload
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+    </button>
+  );
+}
+
+// Compact preview thumb that fronts each SizeTile.
+function SizeThumb({
+  creative,
+  state,
+}: {
+  creative: Creative;
+  state: "shell" | "ready" | "live";
+}) {
+  const hue = creative.placeholderHue ?? 240;
+  const isVideo = creative.kind === "video";
+  // Each format gets its own aspect ratio so the user can read the size
+  // at a glance from the thumb's shape.
+  const width = 72;
+  const aspect = aspectFor(creative.format);
+
+  if (state === "shell") {
+    return (
+      <div
+        className="flex-shrink-0 flex items-center justify-center text-text-tertiary"
+        style={{
+          width,
+          aspectRatio: aspect,
+          background: `repeating-linear-gradient(135deg, oklch(0.94 0.03 ${hue}) 0px 5px, oklch(0.88 0.05 ${(hue + 25) % 360}) 5px 10px)`,
+          border: "1px dashed var(--border)",
+          borderRadius: 6,
+        }}
+        title={`Awaiting ${isVideo ? "video" : "image"} upload`}
+      >
+        <UploadIcon size={12} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex-shrink-0 relative overflow-hidden"
+      style={{
+        width,
+        aspectRatio: aspect,
+        background: creative.assetUrl
+          ? `#000 url(${creative.assetUrl}) center / cover no-repeat`
+          : `linear-gradient(135deg, oklch(0.78 0.10 ${hue}) 0%, oklch(0.62 0.13 ${(hue + 35) % 360}) 100%)`,
+        borderRadius: 6,
+        border: "1px solid var(--border-subtle)",
+      }}
+    >
+      {!creative.assetUrl && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: "55% 14% 18% 14%",
+            background: "rgba(0,0,0,0.55)",
+            borderRadius: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#FFF",
+            fontSize: 7.5,
+            fontWeight: 600,
+            padding: "2px 4px",
+            textAlign: "center",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {creative.format}
+        </div>
+      )}
+      {isVideo && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#FFF",
+          }}
+        >
+          <div
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              background: "rgba(0,0,0,0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1.5px solid #FFF",
+            }}
+          >
+            <Play size={10} fill="#FFF" />
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// ─── Size row (compact) ─────────────────────────────────────────────────
+function aspectFor(format: Creative["format"]): string {
+  switch (format) {
+    case "1:1":
+      return "1 / 1";
+    case "4:5":
+      return "4 / 5";
+    case "9:16":
+      return "9 / 16";
+    case "16:9":
+      return "16 / 9";
+  }
+}
 
-function SizeRow({ c, kind }: { c: Creative; kind: "static" | "video" }) {
-  const draft = c.spend == null;
-  const isWinner = c.tag === "winner";
-
+function StateBadge({ state }: { state: "shell" | "ready" | "live" }) {
+  if (state === "live") return null;
+  const cfg =
+    state === "shell"
+      ? {
+          label: "Drafted · no asset",
+          bg: "#FFFCEB",
+          fg: "#8A6300",
+          border: "#E0CC95",
+        }
+      : {
+          label: "Ready · not live",
+          bg: "#EFF6FF",
+          fg: "#1D4ED8",
+          border: "#BFDBFE",
+        };
   return (
-    <div
-      className="flex items-center gap-3 px-2.5 py-1.5 rounded-[6px]"
+    <span
+      className="inline-flex items-center"
       style={{
-        background: isWinner ? "#F0FDF4" : "var(--bg-page)",
-        border: `1px solid ${isWinner ? "#BBF7D0" : "var(--border-subtle)"}`,
+        padding: "1.5px 6px",
+        borderRadius: 4,
+        fontSize: 9,
+        fontWeight: 600,
+        background: cfg.bg,
+        color: cfg.fg,
+        border: `1px solid ${cfg.border}`,
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
       }}
     >
-      <div style={{ width: 84, flexShrink: 0 }}>
-        <div className="text-[11.5px] font-semibold leading-tight">{c.format}</div>
-        <div className="text-[9.5px] text-text-tertiary">{c.surface}</div>
-      </div>
-      {draft ? (
-        <div className="flex-1 text-[10.5px] text-text-tertiary italic">
-          Pending data — drafted, not launched
-        </div>
-      ) : (
-        <div className="flex-1 flex items-center gap-2.5">
-          {kind === "video" && (
-            <>
-              <Metric label="FFR" v={c.firstFrameRetention} unit="pct" good={70} fair={50} />
-              <Metric label="Hook" v={c.hookRate} unit="pct" good={40} fair={25} />
-              <Metric label="Hold" v={c.holdRate} unit="pct" good={25} fair={15} />
-              <span className="h-3 w-px bg-border-subtle" />
-            </>
-          )}
-          <Metric label="CTR" v={c.ctr} unit="pct" good={1.5} fair={1.0} />
-          <Metric label="CVR" v={c.cvr} unit="pct" good={20} fair={10} />
-          <Metric label="CPVL" v={c.cpvl} unit="currency" />
-        </div>
-      )}
-      {isWinner && (
-        <span
-          className="inline-flex items-center gap-0.5 text-white uppercase"
-          style={{
-            background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-            fontSize: 9.5,
-            fontWeight: 700,
-            padding: "2px 6px",
-            borderRadius: 4,
-            letterSpacing: 0.3,
-          }}
-        >
-          <Star size={8} strokeWidth={3} /> Winner
-        </span>
-      )}
-    </div>
+      {cfg.label}
+    </span>
   );
 }
 

@@ -69,7 +69,46 @@ export type Creative = {
   firstFrameRetention?: number;
   tag?: "winner" | "loser" | null;
   note?: string;
+
+  // ─── Asset lifecycle ────────────────────────────────────────────────
+  /**
+   * URL (or blob URL for uploads) to the actual creative asset. When
+   * absent, the creative is a **shell** — the concept exists but no
+   * file has been attached yet. Shells render as placeholders and
+   * cannot be launched into a campaign.
+   */
+  assetUrl?: string | null;
+  /** Where the asset came from. Used to surface the source on the size tile. */
+  assetSource?: "uploaded" | "generated";
+  /** Stable hue for the placeholder gradient on shell creatives. */
+  placeholderHue?: number;
+  /**
+   * Body copy / headline shown next to the asset in the Meta preview.
+   * Inherited from the angle's hook + CTA when unset.
+   */
+  primaryText?: string;
+  formHeadline?: string;
+  ctaLabel?: string;
 };
+
+/**
+ * Derived asset state for a creative — separate from the run state
+ * (spend / live / paused / draft). Three values:
+ *
+ *   · "shell"  — concept exists, no asset uploaded yet
+ *   · "ready"  — asset uploaded but no spend (not in a campaign)
+ *   · "live"   — asset uploaded *and* the creative has spend / metrics
+ */
+export type CreativeAssetState = "shell" | "ready" | "live";
+
+export function creativeAssetState(c: Creative): CreativeAssetState {
+  // Live = has spend recorded (the creative is actually running).
+  if (c.spend != null) return "live";
+  // Ready = an asset has been generated or uploaded but no spend yet.
+  if (c.assetSource) return "ready";
+  // Otherwise it's a shell — concept exists, no file attached.
+  return "shell";
+}
 
 export type Angle = {
   id: string;
@@ -274,13 +313,21 @@ function cr(
   const cpl = spend !== null && leads ? Math.round(spend / leads) : null;
   const cpvl = spend !== null && verified ? Math.round(spend / verified) : null;
   const cpql = spend !== null && qualified ? Math.round(spend / qualified) : null;
+  const id = `cr-${Math.random().toString(36).slice(2, 8)}`;
+  // Hash the id into a stable hue 0-359 for the placeholder gradient.
+  const placeholderHue =
+    (id.split("").reduce((s, c) => s + c.charCodeAt(0), 0) * 47) % 360;
   return {
-    id: `cr-${Math.random().toString(36).slice(2, 8)}`,
+    id,
     format,
     surface,
     platform,
     kind,
     spend,
+    // Seeded creatives have run — mark them as generated so the preview
+    // surfaces them as proper assets rather than empty shells.
+    assetSource: spend !== null ? "generated" : undefined,
+    placeholderHue,
     impressions: metrics.impressions ?? (spend !== null ? Math.round(spend * 18) : null),
     leads,
     verified,

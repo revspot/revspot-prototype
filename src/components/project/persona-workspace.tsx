@@ -112,28 +112,25 @@ export function PersonaWorkspace({
         : templates.slice(0, 2)
     ).filter(Boolean);
 
+    // Spot generates the angle copy + a static concept (3 sizes). Video
+    // requires an upload, which the angle's "Upload concept" affordance
+    // handles separately. The streaming log spells this out.
     const items: StreamItem[] = [];
     picks.forEach((p, i) => {
       items.push({ id: `a${i}`, label: p.name, indent: 0 });
       items.push({
         id: `a${i}-s`,
         label: "Static concept · 3 sizes",
-        sub: "1:1 · 4:5 · 9:16",
-        indent: 1,
-      });
-      items.push({
-        id: `a${i}-v`,
-        label: "Video concept · 2 sizes",
-        sub: "9:16 · 1:1",
+        sub: "1:1 · 4:5 · 9:16 · video can be uploaded later",
         indent: 1,
       });
     });
 
     setStreamItems(items);
     newAnglePersist.current = (i) => {
-      // Last line of each angle group (i % 3 === 2) → persist that angle.
-      if (i % 3 !== 2) return;
-      const angleIdx = Math.floor(i / 3);
+      // Last line of each angle group (i % 2 === 1) → persist that angle.
+      if (i % 2 !== 1) return;
+      const angleIdx = Math.floor(i / 2);
       const tpl = picks[angleIdx];
       if (!tpl) return;
       mutateRuntimeProject(project.id, (p) => {
@@ -154,10 +151,7 @@ export function PersonaWorkspace({
           concept: {
             hue,
             layout: "hero",
-            creatives: [
-              ...staticSeed(angleId),
-              ...videoSeed(angleId),
-            ],
+            creatives: [...staticSeed(angleId)],
           },
         });
       });
@@ -176,18 +170,21 @@ export function PersonaWorkspace({
     persona.angles.forEach((a) => {
       if (a.id === angleId) angleName = a.name;
     });
+    // Spot only generates static creatives — video concepts require an
+    // upload, which the angle row has a dedicated "Upload concept" button
+    // for. We make that clear in the log copy.
     const items: StreamItem[] = [
-      { id: "s", label: `Drafting concept for ${angleName}`, indent: 0 },
+      { id: "s", label: `Drafting static concept for ${angleName}`, indent: 0 },
       {
-        id: "s-pick",
-        label: "Picking concept variant",
-        sub: "Spot will alternate static/video depending on what's missing",
+        id: "s-format",
+        label: "Picking layout",
+        sub: "image only · for video, use Upload concept",
         indent: 1,
       },
       {
         id: "s-sizes",
         label: "Drafting sizes",
-        sub: "static: 1:1 · 4:5 · 9:16 · video: 9:16 · 1:1",
+        sub: "1:1 · 4:5 · 9:16",
         indent: 1,
       },
     ];
@@ -198,23 +195,10 @@ export function PersonaWorkspace({
         const persona2 = p.personas.find((pp) => pp.id === persona.id);
         const a = persona2?.angles.find((ang) => ang.id === angleId);
         if (!a) return;
-        // Pick whichever concept kind is missing (or has fewer sizes).
-        const hasVideo = a.concept.creatives.some((c) => c.kind === "video");
-        const hasStatic = a.concept.creatives.some((c) => c.kind !== "video");
-        const kind: "static" | "video" =
-          hasVideo && !hasStatic
-            ? "static"
-            : !hasVideo && hasStatic
-              ? "video"
-              : Math.random() > 0.5
-                ? "static"
-                : "video";
-        const fresh =
-          kind === "video"
-            ? videoSeed(`${a.id}-${Date.now().toString(36)}`)
-            : staticSeed(`${a.id}-${Date.now().toString(36)}`);
+        // Spot only generates static — push static sizes. The user
+        // uploads video separately.
+        const fresh = staticSeed(`${a.id}-${Date.now().toString(36)}`);
         a.concept.creatives.push(...fresh);
-        // Flip to live if it was a draft and now has content.
         if (a.status === "draft" && a.concept.creatives.length > 0) {
           a.status = "live";
         }
@@ -573,12 +557,6 @@ function staticSeed(angleId: string): Creative[] {
     makeCreative(`${angleId}-s11`, "1:1", "Meta Feed", "image"),
     makeCreative(`${angleId}-s45`, "4:5", "Meta Feed", "image"),
     makeCreative(`${angleId}-s916`, "9:16", "Meta Stories", "image"),
-  ];
-}
-function videoSeed(angleId: string): Creative[] {
-  return [
-    makeCreative(`${angleId}-v916`, "9:16", "Meta Reels", "video"),
-    makeCreative(`${angleId}-v11`, "1:1", "Meta Feed", "video"),
   ];
 }
 function makeCreative(
