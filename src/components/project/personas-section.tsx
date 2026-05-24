@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Users, Plus } from "lucide-react";
+import { Users, Plus, ArrowUpRight } from "lucide-react";
 import type { ProjectDetail, Creative } from "@/lib/project-data";
 import { mutateRuntimeProject } from "@/lib/project-data";
 import { SectionHeader } from "./shared/section-header";
@@ -273,18 +273,27 @@ export function PersonasSection({
         subtitle="Who we're selling to · each persona's angles, concepts, and sizes"
         onAsk={() => onAsk("Audit personas — who's converting, who isn't?")}
         actions={
-          !newPersonaOpen ? (
-            <button
-              type="button"
-              onClick={() => setNewPersonaOpen(true)}
-              className="apply-btn"
-              style={{
-                background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
-              }}
+          <div className="flex items-center gap-2">
+            <a
+              href={`/projects/${project.id}/deep/personas`}
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button border border-border bg-white text-[11.5px] hover:border-border-hover"
             >
-              <Plus size={11} /> New persona with Spot
-            </button>
-          ) : null
+              <ArrowUpRight size={11} /> Deep dive
+            </a>
+            {!newPersonaOpen && (
+              <button
+                type="button"
+                onClick={() => setNewPersonaOpen(true)}
+                className="apply-btn"
+                style={{
+                  background:
+                    "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
+                }}
+              >
+                <Plus size={11} /> New persona with Spot
+              </button>
+            )}
+          </div>
         }
       />
 

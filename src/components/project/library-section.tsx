@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Layers, Images, Upload, X, Check } from "lucide-react";
+import { Layers, Images, Upload, X, Check, ArrowUpRight } from "lucide-react";
 import type { ProjectDetail, ProjectImage } from "@/lib/project-data";
 import { mutateRuntimeProject } from "@/lib/project-data";
 import { SectionHeader } from "./shared/section-header";
@@ -55,6 +55,12 @@ export function LibrarySection({
           label="Images"
           count={imageCount}
         />
+        <a
+          href={`/projects/${project.id}/deep/library`}
+          className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-button border border-border bg-white text-[11.5px] hover:border-border-hover"
+        >
+          <ArrowUpRight size={11} /> Deep dive
+        </a>
       </div>
 
       {sub === "creatives" ? (

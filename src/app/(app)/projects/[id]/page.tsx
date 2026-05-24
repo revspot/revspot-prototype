@@ -9,11 +9,10 @@ import { ProjectHero } from "@/components/project/project-hero";
 import { GoalPanel } from "@/components/project/goal-panel";
 import { DashboardSection } from "@/components/project/dashboard-section";
 import { PersonasSection } from "@/components/project/personas-section";
-import { MediaPlanSection } from "@/components/project/media-plan-section";
+import { CampaignsTab } from "@/components/project/campaigns-tab";
 import { LibrarySection } from "@/components/project/library-section";
 import { SetupSection } from "@/components/project/setup-section";
 import { ProjectAskBar } from "@/components/project/project-ask-bar";
-import { CampaignCreationFlow } from "@/components/project/campaign-creation-flow";
 import { useSpotStore } from "@/lib/spot/store";
 import { ForbiddenState, useScopeGuard } from "@/components/project/shared/scope-guard";
 
@@ -33,10 +32,6 @@ export default function ProjectDetailPage() {
   const id = (params?.id || "").toString();
   const project = getProject(id);
   const [tab, setTab] = useState<Tab>("dashboard");
-  // PR 1 keeps both legacy Media-plan modes accessible via a small in-tab
-  // switcher. PR 3 unifies the views and removes this.
-  const [campaignsMode, setCampaignsMode] = useState<"drafts" | "campaigns">("campaigns");
-  const [campaignFlowOpen, setCampaignFlowOpen] = useState(false);
   const askSpot = useSpotStore((s) => s.askSpot);
 
   // Scope guard: auto-switch if user has access; show forbidden state if not.
@@ -150,45 +145,7 @@ export default function ProjectDetailPage() {
           <PersonasSection project={project} onAsk={askProject} />
         )}
         {tab === "campaigns" && (
-          <>
-            <div className="flex items-center gap-1.5 mt-3 mb-1">
-              <button
-                type="button"
-                onClick={() => setCampaignsMode("campaigns")}
-                className="inline-flex items-center h-7 px-2.5 rounded-button text-[11.5px] font-medium transition-colors"
-                style={{
-                  background: campaignsMode === "campaigns" ? "#1A1A1A" : "#FFF",
-                  color: campaignsMode === "campaigns" ? "#FFF" : "var(--text-2)",
-                  border: `1px solid ${campaignsMode === "campaigns" ? "#1A1A1A" : "var(--border)"}`,
-                }}
-              >
-                Live
-              </button>
-              <button
-                type="button"
-                onClick={() => setCampaignsMode("drafts")}
-                className="inline-flex items-center h-7 px-2.5 rounded-button text-[11.5px] font-medium transition-colors"
-                style={{
-                  background: campaignsMode === "drafts" ? "#1A1A1A" : "#FFF",
-                  color: campaignsMode === "drafts" ? "#FFF" : "var(--text-2)",
-                  border: `1px solid ${campaignsMode === "drafts" ? "#1A1A1A" : "var(--border)"}`,
-                }}
-              >
-                Plan & drafts
-              </button>
-              <span className="text-[10.5px] text-text-tertiary ml-1">
-                {campaignsMode === "campaigns"
-                  ? "what's actually running"
-                  : "drafts you're building"}
-              </span>
-            </div>
-            <MediaPlanSection
-              project={project}
-              onAsk={askProject}
-              mode={campaignsMode}
-              onNewCampaign={() => setCampaignFlowOpen(true)}
-            />
-          </>
+          <CampaignsTab project={project} onAsk={askProject} />
         )}
         {tab === "library" && (
           <LibrarySection
@@ -207,17 +164,6 @@ export default function ProjectDetailPage() {
       </div>
 
       <ProjectAskBar projectName={project.name} onAsk={askProject} />
-
-      {campaignFlowOpen && (
-        <CampaignCreationFlow
-          projectId={id}
-          onClose={() => setCampaignFlowOpen(false)}
-          onLaunched={() => {
-            setCampaignFlowOpen(false);
-            setTab("campaigns");
-          }}
-        />
-      )}
     </motion.div>
   );
 }

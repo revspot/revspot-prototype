@@ -114,6 +114,28 @@ export type ProjectStrategy = {
   proofPoints: string[];
 };
 
+/**
+ * Top-of-funnel + mid-funnel metrics shared by ads / ad sets / campaigns.
+ * Every field is optional and nullable so seeded campaigns can carry real
+ * numbers while runtime-created campaigns leave them empty until data
+ * lands. The Campaigns tab's column picker selects from this set.
+ */
+export type MediaMetrics = {
+  impressions?: number | null;
+  cpm?: number | null;
+  cpc?: number | null;
+  ctr?: number | null;
+  cvr?: number | null;
+  cpl?: number | null;
+  verifRate?: number | null;
+  qualRate?: number | null;
+  cpql?: number | null;
+  /** Video-only. */
+  hookRate?: number | null;
+  /** Video-only. */
+  holdRate?: number | null;
+};
+
 export type MediaAd = {
   id: string;
   name: string;
@@ -124,7 +146,7 @@ export type MediaAd = {
   leads: number | null;
   cpl: number | null;
   tag?: "winner" | "loser" | null;
-};
+} & MediaMetrics;
 
 export type MediaAdSet = {
   id: string;
@@ -138,7 +160,11 @@ export type MediaAdSet = {
   status: "live" | "paused" | "proposed" | "draft";
   spotChange: string | null;
   ads: MediaAd[];
-};
+  spend?: number | null;
+  leads?: number | null;
+  verified?: number | null;
+  qualified?: number | null;
+} & MediaMetrics;
 
 export type MediaRow = {
   id: string;
@@ -155,7 +181,11 @@ export type MediaRow = {
   /** Optional voice/WhatsApp agent attached to this campaign. */
   agentId?: string;
   agentName?: string;
-};
+  spend?: number | null;
+  leads?: number | null;
+  verified?: number | null;
+  qualified?: number | null;
+} & MediaMetrics;
 
 export type MediaPlan = {
   window: string;
