@@ -14,7 +14,6 @@ import { LibrarySection } from "@/components/project/library-section";
 import { SetupSection } from "@/components/project/setup-section";
 import { ProjectAskBar } from "@/components/project/project-ask-bar";
 import { CampaignCreationFlow } from "@/components/project/campaign-creation-flow";
-import { CreativesFlow } from "@/components/project/creatives-flow";
 import { useSpotStore } from "@/lib/spot/store";
 import { ForbiddenState, useScopeGuard } from "@/components/project/shared/scope-guard";
 
@@ -38,7 +37,6 @@ export default function ProjectDetailPage() {
   // switcher. PR 3 unifies the views and removes this.
   const [campaignsMode, setCampaignsMode] = useState<"drafts" | "campaigns">("campaigns");
   const [campaignFlowOpen, setCampaignFlowOpen] = useState(false);
-  const [creativesFlow, setCreativesFlow] = useState<{ angleId?: string } | null>(null);
   const askSpot = useSpotStore((s) => s.askSpot);
 
   // Scope guard: auto-switch if user has access; show forbidden state if not.
@@ -149,11 +147,7 @@ export default function ProjectDetailPage() {
           <DashboardSection project={project} onAsk={askProject} />
         )}
         {tab === "personas" && (
-          <PersonasSection
-            project={project}
-            onAsk={askProject}
-            onGenerateCreatives={(angleId) => setCreativesFlow({ angleId })}
-          />
+          <PersonasSection project={project} onAsk={askProject} />
         )}
         {tab === "campaigns" && (
           <>
@@ -200,7 +194,7 @@ export default function ProjectDetailPage() {
           <LibrarySection
             project={project}
             onAsk={askProject}
-            onGenerateCreatives={() => setCreativesFlow({})}
+            onGoToPersonas={() => setTab("personas")}
           />
         )}
         {tab === "settings" && (
@@ -213,21 +207,6 @@ export default function ProjectDetailPage() {
       </div>
 
       <ProjectAskBar projectName={project.name} onAsk={askProject} />
-
-      {creativesFlow && (
-        <CreativesFlow
-          projectId={id}
-          initialAngleId={creativesFlow.angleId}
-          onClose={() => setCreativesFlow(null)}
-          onComplete={(_, action) => {
-            setCreativesFlow(null);
-            if (action === "campaign") {
-              setCampaignFlowOpen(true);
-            }
-            // "view" stays on the current project page (no nav needed)
-          }}
-        />
-      )}
 
       {campaignFlowOpen && (
         <CampaignCreationFlow

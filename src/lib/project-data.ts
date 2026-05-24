@@ -62,6 +62,11 @@ export type Creative = {
   cpql: number | null;
   hookRate?: number;
   holdRate?: number;
+  /**
+   * % of viewers who watched past the first frame. Video-only. Higher means
+   * the thumbnail/first frame is doing its job before the ad even plays.
+   */
+  firstFrameRetention?: number;
   tag?: "winner" | "loser" | null;
   note?: string;
 };
@@ -222,7 +227,19 @@ function cr(
   leads: number | null,
   verified: number | null,
   qualified: number | null,
-  metrics: Partial<Pick<Creative, "ctr" | "cvr" | "hookRate" | "holdRate" | "tag" | "note" | "impressions">> = {},
+  metrics: Partial<
+    Pick<
+      Creative,
+      | "ctr"
+      | "cvr"
+      | "hookRate"
+      | "holdRate"
+      | "firstFrameRetention"
+      | "tag"
+      | "note"
+      | "impressions"
+    >
+  > = {},
 ): Creative {
   const cpl = spend !== null && leads ? Math.round(spend / leads) : null;
   const cpvl = spend !== null && verified ? Math.round(spend / verified) : null;
@@ -245,6 +262,14 @@ function cr(
     cpql,
     hookRate: metrics.hookRate,
     holdRate: metrics.holdRate,
+    firstFrameRetention:
+      metrics.firstFrameRetention ??
+      // Reasonable default for any video that has a hook rate: FFR is
+      // generally somewhat higher than hook (people stay past frame 1
+      // before churning at the 3s hook mark).
+      (kind === "video" && metrics.hookRate != null
+        ? Math.min(98, Math.round(metrics.hookRate + 25))
+        : undefined),
     tag: metrics.tag ?? null,
     note: metrics.note,
   };

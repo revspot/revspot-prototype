@@ -19,11 +19,15 @@ type SubTab = "creatives" | "images";
 export function LibrarySection({
   project,
   onAsk,
-  onGenerateCreatives,
+  onGoToPersonas,
 }: {
   project: ProjectDetail;
   onAsk: (q: string) => void;
-  onGenerateCreatives?: () => void;
+  /**
+   * Routes the user to the Personas tab where creatives are now drafted
+   * (PR 2 removed the standalone CreativesFlow modal).
+   */
+  onGoToPersonas?: () => void;
 }) {
   const [sub, setSub] = useState<SubTab>("creatives");
 
@@ -57,7 +61,7 @@ export function LibrarySection({
         <CreativesSection
           project={project}
           onAsk={onAsk}
-          onGenerateCreatives={onGenerateCreatives}
+          onGoToPersonas={onGoToPersonas}
         />
       ) : (
         <ImageBrowser project={project} onAsk={onAsk} />
