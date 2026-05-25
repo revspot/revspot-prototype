@@ -16,7 +16,7 @@ import { RichText } from "@/components/spot/rich-text";
 import { useSpotStore } from "@/lib/spot/store";
 import { AngleRow } from "./angle-row";
 import { InlineSpotComposer, type StreamItem } from "./inline-spot-composer";
-import { DraftStaticFlow } from "./draft-static-flow";
+import { CreativeGeneratorLauncher } from "./creative-generator-launcher";
 
 /**
  * The right pane of the Personas tab — a single persona's workspace.
@@ -46,8 +46,8 @@ export function PersonaWorkspace({
   const [streamItems, setStreamItems] = useState<StreamItem[] | null>(null);
   const newAnglePersist = useRef<((i: number) => void) | null>(null);
 
-  // Inline draft-concept flow state — only one angle at a time can have
-  // the rich DraftStaticFlow open inline.
+  // Generator-modal state — only one angle at a time owns the rich
+  // CreativeGeneratorModal. `draftFor` is the angle id that triggered it.
   const [draftFor, setDraftFor] = useState<string | null>(null);
 
   // Persona-edit form state
@@ -168,8 +168,9 @@ export function PersonaWorkspace({
     newAnglePersist.current = null;
   };
 
-  // The richer DraftStaticFlow component handles its own state once
-  // opened; we just track which angle it's anchored to.
+  // The rich CreativeGeneratorModal owns its own state once opened; we
+  // just track which angle it's anchored to so we can pass the right
+  // angle's hook + CTA + concept context in.
   const startDraftConcept = (angleId: string) => {
     setDraftFor(angleId);
   };
@@ -177,6 +178,10 @@ export function PersonaWorkspace({
   const closeDraftComposer = () => {
     setDraftFor(null);
   };
+
+  const draftAngle = draftFor
+    ? persona.angles.find((a) => a.id === draftFor) ?? null
+    : null;
 
   return (
     <div className="space-y-3">
@@ -384,24 +389,13 @@ export function PersonaWorkspace({
 
         <div className="space-y-2">
           {persona.angles.map((angle) => (
-            <div key={angle.id}>
-              <AngleRow
-                projectId={project.id}
-                persona={persona}
-                angle={angle}
-                onDraftConcept={startDraftConcept}
-              />
-              {draftFor === angle.id && (
-                <div className="mt-2">
-                  <DraftStaticFlow
-                    projectId={project.id}
-                    persona={persona}
-                    angle={angle}
-                    onClose={closeDraftComposer}
-                  />
-                </div>
-              )}
-            </div>
+            <AngleRow
+              key={angle.id}
+              projectId={project.id}
+              persona={persona}
+              angle={angle}
+              onDraftConcept={startDraftConcept}
+            />
           ))}
           {persona.angles.length === 0 && !composerOpen && (
             <div
@@ -416,6 +410,18 @@ export function PersonaWorkspace({
           )}
         </div>
       </div>
+
+      {/* Generator modal — single instance for the workspace, switches
+          context to whichever angle triggered it. */}
+      {draftAngle && (
+        <CreativeGeneratorLauncher
+          open={!!draftAngle}
+          onClose={closeDraftComposer}
+          project={project}
+          persona={persona}
+          angle={draftAngle}
+        />
+      )}
     </div>
   );
 }
