@@ -9,6 +9,7 @@ import {
   PanelRight,
   ChevronRight,
   ArrowUpRight,
+  AlertTriangle,
 } from "lucide-react";
 import type { ProjectDetail, MediaRow } from "@/lib/project-data";
 import { mutateRuntimeProject } from "@/lib/project-data";
@@ -171,6 +172,8 @@ export function CampaignsTab({
         }
       />
 
+      <FormsRequiredBanner project={project} />
+
       {/* Empty state — Spot strategy generator */}
       {rows.length === 0 && (
         <div className="space-y-3">
@@ -294,6 +297,69 @@ export function CampaignsTab({
           selected={selected ?? null}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Forms-required banner ─────────────────────────────────────────────
+
+function FormsRequiredBanner({ project }: { project: ProjectDetail }) {
+  const forms = project.forms ?? [];
+  const publishedCount = forms.filter((f) => f.status === "published").length;
+  if (publishedCount > 0) return null;
+
+  return (
+    <div
+      className="rounded-[10px] p-3 mb-3 flex items-center gap-2.5"
+      style={{
+        background: "#FFFCEB",
+        border: "1px solid #E0CC95",
+      }}
+    >
+      <span
+        className="inline-flex items-center justify-center flex-shrink-0"
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          background: "#E0CC95",
+          color: "#FFF",
+        }}
+      >
+        <AlertTriangle size={13} />
+      </span>
+      <div className="flex-1 text-[11.5px] leading-[1.5]">
+        <strong>No published forms yet.</strong> Meta won&apos;t let any
+        campaign go live without a lead form attached.{" "}
+        {forms.length > 0 && (
+          <>
+            You have {forms.length} draft form
+            {forms.length === 1 ? "" : "s"} — publish at least one to unblock.
+          </>
+        )}
+      </div>
+      <a
+        href={`/projects/${project.id}?tab=forms`}
+        onClick={(e) => {
+          // Soft client-side: route the parent tab to forms without a
+          // full reload. The page reads tab from local state, so a hash
+          // wouldn't help here; the safest cross-tab signal is a small
+          // custom event the project page can hook later. For now, we
+          // fall back to a regular link if needed.
+          e.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent("revspot:tab-switch", { detail: { tab: "forms" } }),
+          );
+        }}
+        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] font-medium flex-shrink-0"
+        style={{
+          background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
+          color: "#FFF",
+          border: "1px solid transparent",
+        }}
+      >
+        Go to Forms →
+      </a>
     </div>
   );
 }

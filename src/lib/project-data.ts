@@ -266,6 +266,55 @@ export type ProjectImage = {
   usedIn: number;
 };
 
+// ─── Lead-gen forms ────────────────────────────────────────────────────
+
+/** A single question shown on the form. The set is small on purpose —
+ * Meta lead-gen forms drop off fast once they're more than 5 questions. */
+export type LeadFormQuestionKind =
+  | "name"
+  | "phone"
+  | "email"
+  | "budget"
+  | "timeline"
+  | "city"
+  | "bhk"
+  | "custom-short"
+  | "custom-multiline"
+  | "custom-single-choice";
+
+export type LeadFormQuestion = {
+  id: string;
+  kind: LeadFormQuestionKind;
+  /** Display label shown to the lead. Editable for custom kinds. */
+  label: string;
+  required: boolean;
+  /** Choices for custom-single-choice questions. */
+  options?: string[];
+};
+
+export type LeadForm = {
+  id: string;
+  name: string;
+  /**
+   * When the form is the *default* for the project (used by any persona
+   * that doesn't have its own form). `null` means a persona-specific
+   * form — `personaId` carries the link.
+   */
+  personaId: string | null;
+  /** Short status pill — drafts can't be attached to campaigns. */
+  status: "draft" | "published";
+  /** Intro screen (optional — when blank, Meta shows the system default). */
+  intro: { headline: string; body: string };
+  /** Questions in the order they're shown. */
+  questions: LeadFormQuestion[];
+  /** Privacy / consent line shown before submit. */
+  privacy: string;
+  /** Completion screen copy (after submit). */
+  completion: { headline: string; body: string; ctaLabel: string; ctaUrl: string };
+  /** When this form was last edited — used for the list view. */
+  updatedAt: string;
+};
+
 export type ProjectDetail = ProjectSummary & {
   workspaceId: string;
   rera: string;
@@ -286,6 +335,10 @@ export type ProjectDetail = ProjectSummary & {
   mediaPlan: MediaPlan;
   experiments: Experiment[];
   images: ProjectImage[];
+  /** Lead-capture forms. A project starts with no forms; users build them
+   * on the Forms tab. At least one published form is required for any
+   * campaign to go live. */
+  forms?: LeadForm[];
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────

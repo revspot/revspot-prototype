@@ -1,9 +1,9 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Users, Settings, Radio, Layers, BarChart3 } from "lucide-react";
+import { ArrowLeft, Users, Settings, Radio, Layers, BarChart3, FileText } from "lucide-react";
 import { getProject } from "@/lib/project-data";
 import { ProjectHero } from "@/components/project/project-hero";
 import { GoalPanel } from "@/components/project/goal-panel";
@@ -12,15 +12,17 @@ import { PersonasSection } from "@/components/project/personas-section";
 import { CampaignsTab } from "@/components/project/campaigns-tab";
 import { LibrarySection } from "@/components/project/library-section";
 import { SetupSection } from "@/components/project/setup-section";
+import { FormsSection } from "@/components/project/forms-section";
 import { ProjectAskBar } from "@/components/project/project-ask-bar";
 import { useSpotStore } from "@/lib/spot/store";
 import { ForbiddenState, useScopeGuard } from "@/components/project/shared/scope-guard";
 
-type Tab = "dashboard" | "personas" | "campaigns" | "library" | "settings";
+type Tab = "dashboard" | "personas" | "forms" | "campaigns" | "library" | "settings";
 
 const TABS: { key: Tab; label: string; icon: typeof Users; sub: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3, sub: "how we're doing" },
   { key: "personas", label: "Personas", icon: Users, sub: "angles · concepts · winners" },
+  { key: "forms", label: "Forms", icon: FileText, sub: "lead capture · required" },
   { key: "campaigns", label: "Campaigns", icon: Radio, sub: "draft · live · optimize" },
   { key: "library", label: "Library", icon: Layers, sub: "creatives + images" },
   { key: "settings", label: "Settings", icon: Settings, sub: "context · goal · agents" },
@@ -32,6 +34,28 @@ export default function ProjectDetailPage() {
   const id = (params?.id || "").toString();
   const project = getProject(id);
   const [tab, setTab] = useState<Tab>("dashboard");
+
+  // Listen for child-component tab-switch requests (e.g. the Campaigns
+  // tab's "Go to Forms →" banner). Strongly-typed via the Tab union so
+  // unknown tabs are ignored.
+  useEffect(() => {
+    const onSwitch = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab: string }>).detail;
+      const allowed: Tab[] = [
+        "dashboard",
+        "personas",
+        "forms",
+        "campaigns",
+        "library",
+        "settings",
+      ];
+      if (detail && allowed.includes(detail.tab as Tab)) {
+        setTab(detail.tab as Tab);
+      }
+    };
+    window.addEventListener("revspot:tab-switch", onSwitch);
+    return () => window.removeEventListener("revspot:tab-switch", onSwitch);
+  }, []);
   const askSpot = useSpotStore((s) => s.askSpot);
 
   // Scope guard: auto-switch if user has access; show forbidden state if not.
@@ -143,6 +167,9 @@ export default function ProjectDetailPage() {
         )}
         {tab === "personas" && (
           <PersonasSection project={project} onAsk={askProject} />
+        )}
+        {tab === "forms" && (
+          <FormsSection project={project} onAsk={askProject} />
         )}
         {tab === "campaigns" && (
           <CampaignsTab project={project} onAsk={askProject} />
