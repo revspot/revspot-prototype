@@ -240,7 +240,88 @@ export type MediaPlan = {
     weeklyExpected: { leads: number; verified: number };
     gapToGoal: string;
   };
+  /** Edits saved by the user but not yet deployed to the live media plan.
+   * Each entry overlays one field on one entity (campaign / ad set / ad).
+   * Deploy walks this list, applies each to the underlying row, and
+   * clears it. */
+  stagedChanges?: StagedChange[];
 };
+
+/**
+ * A single saved-but-not-yet-deployed edit. Tracking edits this way (vs
+ * direct mutation) lets the user accumulate several tweaks across
+ * campaigns + ad sets and ship them as one batch — closer to how Ads
+ * Manager actually works.
+ */
+export type StagedChange =
+  | {
+      id: string;
+      stagedAt: string;
+      scope: "campaign";
+      campaignId: string;
+      field: "name" | "budgetDaily";
+      oldValue: string | number;
+      newValue: string | number;
+      label: string;
+    }
+  | {
+      id: string;
+      stagedAt: string;
+      scope: "adSet";
+      campaignId: string;
+      adSetId: string;
+      field: "name" | "audience" | "budgetDaily";
+      oldValue: string | number;
+      newValue: string | number;
+      label: string;
+    };
+
+/**
+ * Returns the effective value for a campaign field — staged value if
+ * present, otherwise the live value.
+ *
+ * The staged-change "name" field maps to MediaRow.campaign, since
+ * MediaRow uses `campaign` as the human-readable name. budgetDaily
+ * maps directly.
+ */
+export function effectiveCampaignValue<F extends "name" | "budgetDaily">(
+  plan: MediaPlan,
+  campaignId: string,
+  field: F,
+): F extends "name" ? string : number {
+  const row = plan.rows.find((r) => r.id === campaignId);
+  const liveValue =
+    field === "name"
+      ? (row?.campaign ?? "")
+      : (row?.budgetDaily ?? 0);
+  const staged = (plan.stagedChanges || []).find(
+    (c) => c.scope === "campaign" && c.campaignId === campaignId && c.field === field,
+  );
+  return (staged?.newValue ?? liveValue) as F extends "name" ? string : number;
+}
+
+export function effectiveAdSetValue<
+  F extends "name" | "audience" | "budgetDaily",
+>(
+  plan: MediaPlan,
+  campaignId: string,
+  adSetId: string,
+  field: F,
+): F extends "budgetDaily" ? number : string {
+  const row = plan.rows.find((r) => r.id === campaignId);
+  const set = row?.adSets.find((a) => a.id === adSetId);
+  const liveValue = set?.[field] ?? (field === "budgetDaily" ? 0 : "");
+  const staged = (plan.stagedChanges || []).find(
+    (c) =>
+      c.scope === "adSet" &&
+      c.campaignId === campaignId &&
+      c.adSetId === adSetId &&
+      c.field === field,
+  );
+  return (staged?.newValue ?? liveValue) as F extends "budgetDaily"
+    ? number
+    : string;
+}
 
 export type Experiment = {
   id: string;

@@ -9,8 +9,17 @@ import {
   PanelRight,
   ChevronRight,
   ArrowUpRight,
+  ArrowRight,
   AlertTriangle,
+  Clock,
+  X,
 } from "lucide-react";
+import { useSpotStore } from "@/lib/spot/store";
+import {
+  deployStagedChanges,
+  discardAllStagedChanges,
+  discardStagedChange,
+} from "./campaign-staging";
 import type { ProjectDetail, MediaRow } from "@/lib/project-data";
 import { mutateRuntimeProject } from "@/lib/project-data";
 import { SectionHeader } from "./shared/section-header";
@@ -173,6 +182,7 @@ export function CampaignsTab({
       />
 
       <FormsRequiredBanner project={project} />
+      <StagedChangesBar project={project} />
 
       {/* Empty state — Spot strategy generator */}
       {rows.length === 0 && (
@@ -296,6 +306,158 @@ export function CampaignsTab({
           onClearSelection={() => setSelectedId(null)}
           selected={selected ?? null}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── Staged-changes banner ─────────────────────────────────────────────
+
+function StagedChangesBar({ project }: { project: ProjectDetail }) {
+  const showToast = useSpotStore((s) => s.showToast);
+  const [expanded, setExpanded] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const staged = project.mediaPlan.stagedChanges ?? [];
+  if (staged.length === 0) return null;
+
+  const deploy = () => {
+    setDeploying(true);
+    // Brief delay so the Deploy button reads as "actually doing something"
+    // rather than instant — this matches what real Meta deploys feel like.
+    setTimeout(() => {
+      const count = deployStagedChanges(project.id);
+      setDeploying(false);
+      setExpanded(false);
+      showToast(
+        count === 1
+          ? "1 change deployed"
+          : `${count} changes deployed`,
+      );
+    }, 600);
+  };
+
+  const discardAll = () => {
+    if (
+      !window.confirm(
+        `Discard all ${staged.length} staged change${staged.length === 1 ? "" : "s"}? This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    discardAllStagedChanges(project.id);
+    setExpanded(false);
+  };
+
+  return (
+    <div
+      className="rounded-[10px] mb-3"
+      style={{
+        background: "#FFFCEB",
+        border: "1px solid #E0CC95",
+      }}
+    >
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5">
+        <span
+          className="inline-flex items-center justify-center flex-shrink-0"
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            background: "linear-gradient(135deg, #C9A86A 0%, #8A6300 100%)",
+            color: "#FFF",
+          }}
+        >
+          <Clock size={12} />
+        </span>
+        <div className="flex-1 text-[11.5px] leading-[1.4]">
+          <strong>
+            {staged.length} change{staged.length === 1 ? "" : "s"} pending
+          </strong>{" "}
+          — saved but not yet deployed to Meta.
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button border border-border bg-white text-[11.5px] text-text-secondary hover:text-text-primary"
+        >
+          {expanded ? "Hide" : "Review"}
+          <ChevronRight
+            size={11}
+            style={{
+              transform: expanded ? "rotate(90deg)" : "rotate(0)",
+              transition: "transform 160ms",
+            }}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={discardAll}
+          disabled={deploying}
+          className="inline-flex items-center h-7 px-2.5 rounded-button border border-border bg-white text-[11.5px] text-text-secondary hover:text-text-primary"
+        >
+          Discard all
+        </button>
+        <button
+          type="button"
+          onClick={deploy}
+          disabled={deploying}
+          className="inline-flex items-center gap-1.5 h-7 px-3 rounded-button text-[11.5px] font-semibold"
+          style={{
+            background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
+            color: "#FFF",
+            border: "1px solid transparent",
+            opacity: deploying ? 0.6 : 1,
+            cursor: deploying ? "not-allowed" : "pointer",
+          }}
+        >
+          {deploying ? "Deploying…" : "Deploy"}
+          {!deploying && <ArrowRight size={11} />}
+        </button>
+      </div>
+
+      {expanded && (
+        <div
+          className="px-3.5 pb-3 space-y-1.5 fadeUp"
+          style={{ borderTop: "1px solid #E0CC95" }}
+        >
+          <div
+            className="uplabel pt-2.5"
+            style={{ fontSize: 9.5, color: "#9C6D00" }}
+          >
+            Saved changes
+          </div>
+          {staged.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-[6px] text-[11.5px]"
+              style={{
+                background: "#FFF",
+                border: "1px solid #EFE3C2",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "#F59E0B",
+                  flexShrink: 0,
+                }}
+              />
+              <span className="flex-1 truncate">{c.label}</span>
+              <button
+                type="button"
+                onClick={() => discardStagedChange(project.id, c.id)}
+                title="Discard this change"
+                className="text-text-tertiary hover:text-text-secondary"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

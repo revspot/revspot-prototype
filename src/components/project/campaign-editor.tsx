@@ -15,7 +15,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { MediaRow, MediaAdSet, MediaAd, ProjectDetail } from "@/lib/project-data";
-import { mutateRuntimeProject } from "@/lib/project-data";
+import {
+  mutateRuntimeProject,
+  effectiveCampaignValue,
+  effectiveAdSetValue,
+  getProject,
+} from "@/lib/project-data";
+import { stageCampaignEdit, stageAdSetEdit } from "./campaign-staging";
 
 /**
  * Shared editor body — used by both campaign-editor shells (full-tab swap
@@ -82,17 +88,30 @@ function CampaignIdentitySection({
   projectId: string;
   campaign: MediaRow;
 }) {
+  // We read effective values from staging so the editor reflects pending
+  // changes — including those staged in another editor session.
+  const project = readProjectSnapshot(projectId);
+  const effectiveName = project
+    ? effectiveCampaignValue(project.mediaPlan, campaign.id, "name")
+    : campaign.campaign;
+  const effectiveBudget = project
+    ? effectiveCampaignValue(project.mediaPlan, campaign.id, "budgetDaily")
+    : campaign.budgetDaily;
+
+  // Track pending fields so we can decorate the inputs.
+  const namePending = effectiveName !== campaign.campaign;
+  const budgetPending = effectiveBudget !== campaign.budgetDaily;
+
   const updateName = (next: string) => {
-    mutateRuntimeProject(projectId, (p) => {
-      const c = p.mediaPlan.rows.find((r) => r.id === campaign.id);
-      if (c) c.campaign = next;
-    });
+    stageCampaignEdit(projectId, campaign.id, "name", next.trim() || campaign.campaign);
   };
   const updateBudget = (next: number) => {
-    mutateRuntimeProject(projectId, (p) => {
-      const c = p.mediaPlan.rows.find((r) => r.id === campaign.id);
-      if (c) c.budgetDaily = Math.max(0, Math.round(next));
-    });
+    stageCampaignEdit(
+      projectId,
+      campaign.id,
+      "budgetDaily",
+      Math.max(0, Math.round(next)),
+    );
   };
 
   const [bidStrategy, setBidStrategy] = useState<"highest-volume" | "cost-cap">(
@@ -108,12 +127,16 @@ function CampaignIdentitySection({
       />
 
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <Labeled label="Campaign name">
+        <Labeled label="Campaign name" pending={namePending}>
           <input
             type="text"
-            defaultValue={campaign.campaign}
+            key={`name-${effectiveName}`}
+            defaultValue={effectiveName}
             onBlur={(e) => updateName(e.target.value)}
-            className="w-full outline-none rounded-[8px] border border-border px-3 py-2 text-[13px]"
+            className="w-full outline-none rounded-[8px] px-3 py-2 text-[13px]"
+            style={{
+              border: `1px solid ${namePending ? "#F59E0B" : "var(--border)"}`,
+            }}
           />
         </Labeled>
         <Labeled label="Objective">
@@ -131,12 +154,16 @@ function CampaignIdentitySection({
             </span>
           </div>
         </Labeled>
-        <Labeled label="Daily budget (₹)">
+        <Labeled label="Daily budget (₹)" pending={budgetPending}>
           <input
             type="number"
-            defaultValue={campaign.budgetDaily}
+            key={`budget-${effectiveBudget}`}
+            defaultValue={effectiveBudget}
             onBlur={(e) => updateBudget(Number(e.target.value))}
-            className="w-full outline-none rounded-[8px] border border-border px-3 py-2 text-[13px] tabular-nums"
+            className="w-full outline-none rounded-[8px] px-3 py-2 text-[13px] tabular-nums"
+            style={{
+              border: `1px solid ${budgetPending ? "#F59E0B" : "var(--border)"}`,
+            }}
           />
         </Labeled>
         <Labeled label="Pacing">
@@ -320,20 +347,35 @@ function AdSetCard({
   };
 
   const updateAdSetName = (next: string) => {
-    mutateRuntimeProject(projectId, (p) => {
-      const c = p.mediaPlan.rows.find((r) => r.id === campaignId);
-      const a = c?.adSets.find((x) => x.id === adSet.id);
-      if (a) a.name = next;
-    });
+    stageAdSetEdit(projectId, campaignId, adSet.id, "name", next.trim() || adSet.name);
+  };
+  const updateAdSetAudience = (next: string) => {
+    stageAdSetEdit(projectId, campaignId, adSet.id, "audience", next.trim() || adSet.audience);
+  };
+  const updateAdSetBudget = (next: number) => {
+    stageAdSetEdit(
+      projectId,
+      campaignId,
+      adSet.id,
+      "budgetDaily",
+      Math.max(0, Math.round(next)),
+    );
   };
 
-  const updateAdSetBudget = (next: number) => {
-    mutateRuntimeProject(projectId, (p) => {
-      const c = p.mediaPlan.rows.find((r) => r.id === campaignId);
-      const a = c?.adSets.find((x) => x.id === adSet.id);
-      if (a) a.budgetDaily = Math.max(0, Math.round(next));
-    });
-  };
+  // Effective (staged-overlay) values for display.
+  const project = readProjectSnapshot(projectId);
+  const effectiveName = project
+    ? effectiveAdSetValue(project.mediaPlan, campaignId, adSet.id, "name")
+    : adSet.name;
+  const effectiveAudience = project
+    ? effectiveAdSetValue(project.mediaPlan, campaignId, adSet.id, "audience")
+    : adSet.audience;
+  const effectiveBudget = project
+    ? effectiveAdSetValue(project.mediaPlan, campaignId, adSet.id, "budgetDaily")
+    : adSet.budgetDaily;
+  const namePending = effectiveName !== adSet.name;
+  const audiencePending = effectiveAudience !== adSet.audience;
+  const budgetPending = effectiveBudget !== adSet.budgetDaily;
 
   return (
     <div
@@ -357,15 +399,21 @@ function AdSetCard({
           }}
         />
         <div className="flex-1 min-w-0">
-          <input
-            type="text"
-            defaultValue={adSet.name}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={(e) => updateAdSetName(e.target.value)}
-            className="w-full outline-none border-none bg-transparent text-[12.5px] font-semibold leading-tight"
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              key={`adset-name-${effectiveName}`}
+              defaultValue={effectiveName}
+              onClick={(e) => e.stopPropagation()}
+              onBlur={(e) => updateAdSetName(e.target.value)}
+              className="w-full outline-none border-none bg-transparent text-[12.5px] font-semibold leading-tight"
+            />
+            {(namePending || audiencePending || budgetPending) && (
+              <PendingDot />
+            )}
+          </div>
           <div className="text-[10.5px] text-text-tertiary mt-0.5">
-            {adSet.audience} · ₹{adSet.budgetDaily.toLocaleString()}/day · {adSet.ads.length}{" "}
+            {effectiveAudience} · ₹{effectiveBudget.toLocaleString()}/day · {adSet.ads.length}{" "}
             ad{adSet.ads.length === 1 ? "" : "s"}
           </div>
         </div>
@@ -398,19 +446,28 @@ function AdSetCard({
           style={{ borderTop: "1px solid var(--border-subtle)" }}
         >
           <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <Labeled label="Audience">
+            <Labeled label="Audience" pending={audiencePending}>
               <input
                 type="text"
-                defaultValue={adSet.audience}
-                className="w-full outline-none rounded-[8px] border border-border px-3 py-2 text-[12.5px]"
+                key={`adset-aud-${effectiveAudience}`}
+                defaultValue={effectiveAudience}
+                onBlur={(e) => updateAdSetAudience(e.target.value)}
+                className="w-full outline-none rounded-[8px] px-3 py-2 text-[12.5px]"
+                style={{
+                  border: `1px solid ${audiencePending ? "#F59E0B" : "var(--border)"}`,
+                }}
               />
             </Labeled>
-            <Labeled label="Daily budget (₹)">
+            <Labeled label="Daily budget (₹)" pending={budgetPending}>
               <input
                 type="number"
-                defaultValue={adSet.budgetDaily}
+                key={`adset-budget-${effectiveBudget}`}
+                defaultValue={effectiveBudget}
                 onBlur={(e) => updateAdSetBudget(Number(e.target.value))}
-                className="w-full outline-none rounded-[8px] border border-border px-3 py-2 text-[12.5px] tabular-nums"
+                className="w-full outline-none rounded-[8px] px-3 py-2 text-[12.5px] tabular-nums"
+                style={{
+                  border: `1px solid ${budgetPending ? "#F59E0B" : "var(--border)"}`,
+                }}
               />
             </Labeled>
           </div>
@@ -700,22 +757,70 @@ function SectionLabel({
 
 function Labeled({
   label,
+  pending,
   children,
 }: {
   label: string;
+  /** When true, the label shows an amber "pending" pill next to it
+   * indicating this field has a staged-but-not-deployed change. */
+  pending?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="mt-2 first:mt-0">
       <div
-        className="uplabel mb-1.5"
+        className="uplabel mb-1.5 flex items-center gap-1.5"
         style={{ fontSize: 9.5, color: "var(--text-tertiary)", letterSpacing: "0.4px" }}
       >
-        {label}
+        <span>{label}</span>
+        {pending && (
+          <span
+            className="inline-flex items-center"
+            style={{
+              fontSize: 8.5,
+              color: "#9C6D00",
+              background: "#FFFCEB",
+              border: "1px solid #E0CC95",
+              padding: "0 4px",
+              borderRadius: 3,
+              letterSpacing: 0.3,
+            }}
+          >
+            Pending
+          </span>
+        )}
       </div>
       {children}
     </div>
   );
+}
+
+function PendingDot() {
+  return (
+    <span
+      title="Has pending changes"
+      style={{
+        display: "inline-block",
+        width: 6,
+        height: 6,
+        borderRadius: "50%",
+        background: "#F59E0B",
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/**
+ * Returns the freshest project snapshot. Used by the editor to read
+ * staged-overlay values; mutate is synchronous so React re-renders the
+ * editor when the parent passes a new project.
+ *
+ * Named with a `read*` prefix so React's rules-of-hooks lint stays
+ * happy (this isn't a hook even though it reads from a runtime store).
+ */
+function readProjectSnapshot(projectId: string) {
+  return getProject(projectId);
 }
 
 function SegmentedControl<T extends string>({
