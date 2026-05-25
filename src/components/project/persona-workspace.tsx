@@ -16,6 +16,7 @@ import { RichText } from "@/components/spot/rich-text";
 import { useSpotStore } from "@/lib/spot/store";
 import { AngleRow } from "./angle-row";
 import { InlineSpotComposer, type StreamItem } from "./inline-spot-composer";
+import { DraftStaticFlow } from "./draft-static-flow";
 
 /**
  * The right pane of the Personas tab — a single persona's workspace.
@@ -45,10 +46,9 @@ export function PersonaWorkspace({
   const [streamItems, setStreamItems] = useState<StreamItem[] | null>(null);
   const newAnglePersist = useRef<((i: number) => void) | null>(null);
 
-  // Inline draft-concept composer state (one at a time, keyed by angleId)
+  // Inline draft-concept flow state — only one angle at a time can have
+  // the rich DraftStaticFlow open inline.
   const [draftFor, setDraftFor] = useState<string | null>(null);
-  const [draftStream, setDraftStream] = useState<StreamItem[] | null>(null);
-  const draftPersist = useRef<((i: number) => void) | null>(null);
 
   // Persona-edit form state
   const [name, setName] = useState(persona.name);
@@ -64,7 +64,6 @@ export function PersonaWorkspace({
     setComposerOpen(false);
     setStreamItems(null);
     setDraftFor(null);
-    setDraftStream(null);
     setName(persona.name);
     setRole(persona.role);
     setWant(persona.want);
@@ -169,52 +168,14 @@ export function PersonaWorkspace({
     newAnglePersist.current = null;
   };
 
+  // The richer DraftStaticFlow component handles its own state once
+  // opened; we just track which angle it's anchored to.
   const startDraftConcept = (angleId: string) => {
     setDraftFor(angleId);
-    let angleName = "this angle";
-    persona.angles.forEach((a) => {
-      if (a.id === angleId) angleName = a.name;
-    });
-    // Spot only generates static creatives — video concepts require an
-    // upload, which the angle row has a dedicated "Upload concept" button
-    // for. We make that clear in the log copy.
-    const items: StreamItem[] = [
-      { id: "s", label: `Drafting static concept for ${angleName}`, indent: 0 },
-      {
-        id: "s-format",
-        label: "Picking layout",
-        sub: "image only · for video, use Upload concept",
-        indent: 1,
-      },
-      {
-        id: "s-sizes",
-        label: "Drafting sizes",
-        sub: "1:1 · 4:5 · 9:16",
-        indent: 1,
-      },
-    ];
-    setDraftStream(items);
-    draftPersist.current = (i) => {
-      if (i !== items.length - 1) return;
-      mutateRuntimeProject(project.id, (p) => {
-        const persona2 = p.personas.find((pp) => pp.id === persona.id);
-        const a = persona2?.angles.find((ang) => ang.id === angleId);
-        if (!a) return;
-        // Spot only generates static — push static sizes. The user
-        // uploads video separately.
-        const fresh = staticSeed(`${a.id}-${Date.now().toString(36)}`);
-        a.concept.creatives.push(...fresh);
-        if (a.status === "draft" && a.concept.creatives.length > 0) {
-          a.status = "live";
-        }
-      });
-    };
   };
 
   const closeDraftComposer = () => {
     setDraftFor(null);
-    setDraftStream(null);
-    draftPersist.current = null;
   };
 
   return (
@@ -432,16 +393,11 @@ export function PersonaWorkspace({
               />
               {draftFor === angle.id && (
                 <div className="mt-2">
-                  <InlineSpotComposer
-                    prompt={`Drafting a concept for ${angle.name}`}
-                    placeholder=""
-                    primaryLabel="Draft"
-                    onStart={() => {}}
-                    onCancel={closeDraftComposer}
-                    streamItems={draftStream ?? undefined}
-                    streamHeader="Spot is drafting"
-                    onItemComplete={(i) => draftPersist.current?.(i)}
-                    onDone={closeDraftComposer}
+                  <DraftStaticFlow
+                    projectId={project.id}
+                    persona={persona}
+                    angle={angle}
+                    onClose={closeDraftComposer}
                   />
                 </div>
               )}
