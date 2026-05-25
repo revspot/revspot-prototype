@@ -274,6 +274,18 @@ export type StagedChange =
       oldValue: string | number;
       newValue: string | number;
       label: string;
+    }
+  | {
+      id: string;
+      stagedAt: string;
+      scope: "ad";
+      campaignId: string;
+      adSetId: string;
+      adId: string;
+      field: "name" | "status";
+      oldValue: string;
+      newValue: string;
+      label: string;
     };
 
 /**
@@ -321,6 +333,34 @@ export function effectiveAdSetValue<
   return (staged?.newValue ?? liveValue) as F extends "budgetDaily"
     ? number
     : string;
+}
+
+/**
+ * Effective value for an ad-level field — staged value if present,
+ * otherwise the live value. Ad-level edits cover the two settings that
+ * make sense to tweak from the project page: display name and run
+ * status (live / paused).
+ */
+export function effectiveAdValue<F extends "name" | "status">(
+  plan: MediaPlan,
+  campaignId: string,
+  adSetId: string,
+  adId: string,
+  field: F,
+): string {
+  const row = plan.rows.find((r) => r.id === campaignId);
+  const set = row?.adSets.find((a) => a.id === adSetId);
+  const ad = set?.ads.find((x) => x.id === adId);
+  const liveValue = ad?.[field] ?? "";
+  const staged = (plan.stagedChanges || []).find(
+    (c) =>
+      c.scope === "ad" &&
+      c.campaignId === campaignId &&
+      c.adSetId === adSetId &&
+      c.adId === adId &&
+      c.field === field,
+  );
+  return (staged?.newValue as string) ?? (liveValue as string);
 }
 
 export type Experiment = {

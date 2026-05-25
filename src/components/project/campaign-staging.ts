@@ -115,6 +115,60 @@ export function stageAdSetEdit(
   });
 }
 
+/** Stage an ad-level edit. Ad scope today covers name + status
+ * (live / paused) — those are the two settings that make sense to
+ * adjust from the project page without bouncing into Ads Manager. */
+export function stageAdEdit(
+  projectId: string,
+  campaignId: string,
+  adSetId: string,
+  adId: string,
+  field: "name" | "status",
+  newValue: string,
+): void {
+  mutateRuntimeProject(projectId, (p) => {
+    const plan = p.mediaPlan;
+    const row = plan.rows.find((r) => r.id === campaignId);
+    const set = row?.adSets.find((a) => a.id === adSetId);
+    const ad = set?.ads.find((x) => x.id === adId);
+    if (!row || !set || !ad) return;
+    if (!plan.stagedChanges) plan.stagedChanges = [];
+
+    const live = ad[field];
+    const existingIdx = plan.stagedChanges.findIndex(
+      (c) =>
+        c.scope === "ad" &&
+        c.campaignId === campaignId &&
+        c.adSetId === adSetId &&
+        c.adId === adId &&
+        c.field === field,
+    );
+
+    if (newValue === live) {
+      if (existingIdx >= 0) plan.stagedChanges.splice(existingIdx, 1);
+      return;
+    }
+
+    const change: StagedChange = {
+      id: existingIdx >= 0 ? plan.stagedChanges[existingIdx].id : nextChangeId(),
+      stagedAt: new Date().toISOString(),
+      scope: "ad",
+      campaignId,
+      adSetId,
+      adId,
+      field,
+      oldValue: live as string,
+      newValue,
+      label: labelForAd(field, ad.name, set.name, live as string, newValue),
+    };
+    if (existingIdx >= 0) {
+      plan.stagedChanges[existingIdx] = change;
+    } else {
+      plan.stagedChanges.push(change);
+    }
+  });
+}
+
 /** Deploy every staged change: copy newValue into the live entity field
  * and clear the buffer. Returns the count of changes that were applied. */
 export function deployStagedChanges(projectId: string): number {
@@ -132,7 +186,7 @@ export function deployStagedChanges(projectId: string): number {
           row.budgetDaily = change.newValue as number;
         }
         count += 1;
-      } else {
+      } else if (change.scope === "adSet") {
         const set = row.adSets.find((a) => a.id === change.adSetId);
         if (!set) continue;
         if (change.field === "name") set.name = change.newValue as string;
@@ -140,6 +194,14 @@ export function deployStagedChanges(projectId: string): number {
           set.audience = change.newValue as string;
         else if (change.field === "budgetDaily")
           set.budgetDaily = change.newValue as number;
+        count += 1;
+      } else if (change.scope === "ad") {
+        const set = row.adSets.find((a) => a.id === change.adSetId);
+        const ad = set?.ads.find((x) => x.id === change.adId);
+        if (!ad) continue;
+        if (change.field === "name") ad.name = change.newValue;
+        else if (change.field === "status")
+          ad.status = change.newValue as "live" | "draft";
         count += 1;
       }
     }
@@ -197,4 +259,21 @@ function labelForAdSet(
     return `${campaignName} · ${liveName} · audience → "${newValue}"`;
   }
   return `${campaignName} · ${liveName} · budget ₹${oldValue} → ₹${newValue}/day`;
+}
+
+function labelForAd(
+  field: "name" | "status",
+  liveName: string,
+  adSetName: string,
+  oldValue: string,
+  newValue: string,
+): string {
+  if (field === "name") {
+    return `${adSetName} · ad renamed "${oldValue}" → "${newValue}"`;
+  }
+  // status — describe the transition concisely.
+  if (newValue === "draft") {
+    return `${adSetName} · ${liveName} · paused (was ${oldValue})`;
+  }
+  return `${adSetName} · ${liveName} · resumed → live (was ${oldValue})`;
 }

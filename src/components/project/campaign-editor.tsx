@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
-  Copy,
   MapPin,
   Plus,
   Settings,
@@ -19,9 +18,14 @@ import {
   mutateRuntimeProject,
   effectiveCampaignValue,
   effectiveAdSetValue,
+  effectiveAdValue,
   getProject,
 } from "@/lib/project-data";
-import { stageCampaignEdit, stageAdSetEdit } from "./campaign-staging";
+import {
+  stageCampaignEdit,
+  stageAdSetEdit,
+  stageAdEdit,
+} from "./campaign-staging";
 
 /**
  * Shared editor body — used by both campaign-editor shells (full-tab swap
@@ -74,7 +78,7 @@ export function CampaignEditor({
 
       <CampaignIdentitySection projectId={project.id} campaign={campaign} />
       <CampaignAdSetsSection projectId={project.id} campaign={campaign} />
-      <CampaignAdsSection campaign={campaign} />
+      <CampaignAdsSection projectId={project.id} campaign={campaign} />
     </div>
   );
 }
@@ -651,10 +655,17 @@ function AdSetCard({
 
 // ─── Ads section ────────────────────────────────────────────────────────
 
-function CampaignAdsSection({ campaign }: { campaign: MediaRow }) {
-  const allAds: { adSetName: string; ad: MediaAd }[] = campaign.adSets.flatMap((s) =>
-    s.ads.map((ad) => ({ adSetName: s.name, ad })),
-  );
+function CampaignAdsSection({
+  projectId,
+  campaign,
+}: {
+  projectId: string;
+  campaign: MediaRow;
+}) {
+  const allAds: { adSetName: string; adSetId: string; ad: MediaAd }[] =
+    campaign.adSets.flatMap((s) =>
+      s.ads.map((ad) => ({ adSetName: s.name, adSetId: s.id, ad })),
+    );
 
   return (
     <div className="card-base p-4">
@@ -680,52 +691,146 @@ function CampaignAdsSection({ campaign }: { campaign: MediaRow }) {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {allAds.map(({ adSetName, ad }) => (
-            <div
+          {allAds.map(({ adSetName, adSetId, ad }) => (
+            <AdRow
               key={ad.id}
-              className="flex items-center gap-3 px-3 py-2 rounded-[6px]"
-              style={{
-                background: ad.tag === "winner" ? "#F0FDF4" : "#FFF",
-                border: `1px solid ${ad.tag === "winner" ? "#BBF7D0" : "var(--border-subtle)"}`,
-              }}
-            >
-              <Layers size={13} className="text-text-tertiary" />
-              <div className="flex-1 min-w-0">
-                <div className="text-[12px] font-medium truncate">{ad.name}</div>
-                <div className="text-[10.5px] text-text-tertiary">
-                  {adSetName} · {ad.status}
-                </div>
-              </div>
-              {ad.spend != null && (
-                <div className="text-[10.5px] text-text-tertiary tabular-nums">
-                  ₹{(ad.spend / 1000).toFixed(1)}K · {ad.leads} leads
-                </div>
-              )}
-              {ad.tag === "winner" && (
-                <span
-                  className="text-white uppercase"
-                  style={{
-                    background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
-                    fontSize: 9.5,
-                    fontWeight: 700,
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                    letterSpacing: 0.3,
-                  }}
-                >
-                  Winner
-                </span>
-              )}
-              <button
-                type="button"
-                className="inline-flex items-center justify-center h-6 w-6 rounded-button text-text-tertiary hover:text-text-secondary"
-              >
-                <Copy size={11} />
-              </button>
-            </div>
+              projectId={projectId}
+              campaignId={campaign.id}
+              adSetId={adSetId}
+              adSetName={adSetName}
+              ad={ad}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Editable row for a single ad within the campaign editor. Two
+ * settings can be edited inline and staged:
+ *   · name — click to edit, blur to commit
+ *   · status — Pause/Resume button toggles between live and draft
+ *
+ * Pending-dot indicators surface when either field has a staged edit;
+ * the deploy bar at the top of the page is the one that actually pushes
+ * the change to "live."
+ */
+function AdRow({
+  projectId,
+  campaignId,
+  adSetId,
+  adSetName,
+  ad,
+}: {
+  projectId: string;
+  campaignId: string;
+  adSetId: string;
+  adSetName: string;
+  ad: MediaAd;
+}) {
+  const project = readProjectSnapshot(projectId);
+  const effectiveName = project
+    ? effectiveAdValue(project.mediaPlan, campaignId, adSetId, ad.id, "name")
+    : ad.name;
+  const effectiveStatus = project
+    ? effectiveAdValue(project.mediaPlan, campaignId, adSetId, ad.id, "status")
+    : ad.status;
+  const namePending = effectiveName !== ad.name;
+  const statusPending = effectiveStatus !== ad.status;
+
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(effectiveName);
+
+  const startEditName = () => {
+    setDraftName(effectiveName);
+    setEditingName(true);
+  };
+  const commitName = () => {
+    const next = draftName.trim() || ad.name;
+    stageAdEdit(projectId, campaignId, adSetId, ad.id, "name", next);
+    setEditingName(false);
+  };
+  const cancelName = () => {
+    setDraftName(effectiveName);
+    setEditingName(false);
+  };
+
+  const togglePause = () => {
+    const next = effectiveStatus === "live" ? "draft" : "live";
+    stageAdEdit(projectId, campaignId, adSetId, ad.id, "status", next);
+  };
+
+  const isPaused = effectiveStatus === "draft";
+
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2 rounded-[6px]"
+      style={{
+        background: ad.tag === "winner" ? "#F0FDF4" : "#FFF",
+        border: `1px solid ${ad.tag === "winner" ? "#BBF7D0" : "var(--border-subtle)"}`,
+        opacity: isPaused ? 0.7 : 1,
+      }}
+    >
+      <Layers size={13} className="text-text-tertiary flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        {editingName ? (
+          <input
+            autoFocus
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitName();
+              if (e.key === "Escape") cancelName();
+            }}
+            className="w-full outline-none rounded-[4px] border border-border px-1.5 py-0.5 text-[12px] font-medium"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={startEditName}
+            className="text-[12px] font-medium truncate text-left w-full hover:text-text-primary"
+            title="Click to rename"
+          >
+            {effectiveName}
+            {namePending && <PendingDot />}
+          </button>
+        )}
+        <div className="text-[10.5px] text-text-tertiary">
+          {adSetName} · {effectiveStatus}
+          {statusPending && <PendingDot />}
+        </div>
+      </div>
+      {ad.spend != null && (
+        <div className="text-[10.5px] text-text-tertiary tabular-nums">
+          ₹{(ad.spend / 1000).toFixed(1)}K · {ad.leads} leads
+        </div>
+      )}
+      {ad.tag === "winner" && (
+        <span
+          className="text-white uppercase"
+          style={{
+            background: "linear-gradient(135deg, #15803D 0%, #22C55E 100%)",
+            fontSize: 9.5,
+            fontWeight: 700,
+            padding: "2px 6px",
+            borderRadius: 4,
+            letterSpacing: 0.3,
+          }}
+        >
+          Winner
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={togglePause}
+        title={isPaused ? "Resume ad (stages a change)" : "Pause ad (stages a change)"}
+        className="inline-flex items-center gap-1 h-6 px-2 rounded-button border border-border bg-white text-[10.5px] text-text-secondary hover:text-text-primary"
+      >
+        {isPaused ? "Resume" : "Pause"}
+      </button>
     </div>
   );
 }
