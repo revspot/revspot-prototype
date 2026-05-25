@@ -84,7 +84,7 @@ export function LaunchCreativeFlow({
         const headlineSize = concept.sizes[0];
         adSet.ads.push({
           id: adId,
-          name: `${persona.name} · ${angle.name} · ${concept.kind === "video" ? "Video" : "Static"}`,
+          name: `${persona.name} · ${angle.name} · ${concept.kind === "video" ? "Video" : "Image"}`,
           personaId: persona.id,
           angleIdx: 0,
           status: "live",
@@ -128,7 +128,7 @@ export function LaunchCreativeFlow({
           <div className="flex-1">
             <div className="text-[12.5px] font-semibold leading-tight">Added to campaign</div>
             <div className="text-[11px] text-text-secondary">
-              {persona.name} · {angle.name} · {concept?.kind === "video" ? "Video" : "Static"}
+              {persona.name} · {angle.name} · {concept?.kind === "video" ? "Video" : "Image"}
             </div>
           </div>
         </div>
@@ -181,7 +181,7 @@ export function LaunchCreativeFlow({
             {concepts.length === 0 && <option value="">No concepts</option>}
             {concepts.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.kind === "video" ? "Video" : "Static"} · {c.sizes.length} sizes
+                {c.kind === "video" ? "Video" : "Image"} · {c.sizes.length} sizes
               </option>
             ))}
           </select>

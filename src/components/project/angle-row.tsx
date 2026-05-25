@@ -59,12 +59,6 @@ export function AngleRow({
   const [launchingFor, setLaunchingFor] = useState<string | null>(null);
   const [sizesFor, setSizesFor] = useState<string | null>(null);
 
-  // Derive the live data we display in the collapsed-row metric chip.
-  const totalLive = angle.concept.creatives.filter((c) => c.spend != null);
-  const totalSpend = totalLive.reduce((s, c) => s + (c.spend || 0), 0);
-  const totalVerified = totalLive.reduce((s, c) => s + (c.verified || 0), 0);
-  const aggCpvl = totalVerified ? Math.round(totalSpend / totalVerified) : null;
-
   return (
     <div
       className="rounded-[10px]"
@@ -112,11 +106,6 @@ export function AngleRow({
         <span className="text-[11px] text-text-tertiary truncate flex-1 min-w-0">
           {concepts.length} concept{concepts.length === 1 ? "" : "s"}
         </span>
-        {angle.status === "live" && totalVerified > 0 && (
-          <span className="text-[11px] tabular-nums text-text-secondary flex-shrink-0">
-            {totalVerified} verified · CPVL ₹{aggCpvl?.toLocaleString() ?? "—"}
-          </span>
-        )}
       </button>
 
       {/* Expansion */}
@@ -176,14 +165,14 @@ export function AngleRow({
             <button
               type="button"
               onClick={() => onDraftConcept?.(angle.id)}
-              title="Spot drafts a static concept (image). For video, use Upload concept."
+              title="Spot drafts an image concept. For video, use Upload concept."
               className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] text-text-secondary hover:text-text-primary"
               style={{
                 border: "1px dashed var(--border)",
                 background: "transparent",
               }}
             >
-              <Plus size={11} /> Draft static with Spot
+              <Plus size={11} /> Draft image with Spot
             </button>
             <UploadConceptButton
               projectId={projectId}
@@ -1111,7 +1100,7 @@ function ConceptKindBadge({ kind }: { kind: "static" | "video" }) {
   const cfg =
     kind === "video"
       ? { bg: "#F4ECFF", fg: "#7C3AED", Icon: VideoIcon, label: "Video" }
-      : { bg: "var(--bg-secondary)", fg: "var(--text-2)", Icon: ImageIcon, label: "Static" };
+      : { bg: "var(--bg-secondary)", fg: "var(--text-2)", Icon: ImageIcon, label: "Image" };
   const I = cfg.Icon;
   return (
     <span

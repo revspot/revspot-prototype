@@ -612,7 +612,7 @@ function WinningConceptCell({
           letterSpacing: 0.3,
         }}
       >
-        <Icon size={9} /> {isVideo ? "Video" : "Static"}
+        <Icon size={9} /> {isVideo ? "Video" : "Image"}
       </span>
       <span className="truncate font-medium" title={winner.angle.name}>
         {winner.angle.name}
