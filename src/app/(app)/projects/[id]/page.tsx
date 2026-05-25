@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Users, Settings, Radio, Layers, BarChart3, FileText } from "lucide-react";
+import { ArrowLeft, Users, Settings, Radio, Layers, BarChart3 } from "lucide-react";
 import { getProject } from "@/lib/project-data";
 import { ProjectHero } from "@/components/project/project-hero";
 import { GoalPanel } from "@/components/project/goal-panel";
@@ -15,6 +15,7 @@ import {
   type LibrarySubTab,
 } from "@/components/project/library-section";
 import { SetupSection } from "@/components/project/setup-section";
+import { SetupChecklist } from "@/components/project/setup-checklist";
 import { ProjectAskBar } from "@/components/project/project-ask-bar";
 import { useSpotStore } from "@/lib/spot/store";
 import { ForbiddenState, useScopeGuard } from "@/components/project/shared/scope-guard";
@@ -166,11 +167,11 @@ export default function ProjectDetailPage() {
 
       <ProjectHero project={project} onAsk={askProject} />
       <GoalPanel project={project} onAsk={askProject} />
-      <FormsReadinessBanner
+      <SetupChecklist
         project={project}
-        onGoToForms={() => {
-          setLibrarySub("forms");
-          setTab("library");
+        onGoTo={(target, sub) => {
+          if (target === "library" && sub) setLibrarySub(sub);
+          setTab(target);
         }}
       />
 
@@ -238,67 +239,3 @@ export default function ProjectDetailPage() {
   );
 }
 
-/**
- * Top-level readiness banner — surfaces the forms blocker on any tab so
- * the user lands on Dashboard and immediately sees that no campaign can
- * go live until a form is published. Lives between the GoalPanel and
- * the tabs row so it's always visible without crowding either.
- */
-function FormsReadinessBanner({
-  project,
-  onGoToForms,
-}: {
-  project: ReturnType<typeof getProject>;
-  onGoToForms: () => void;
-}) {
-  if (!project) return null;
-  const forms = project.forms ?? [];
-  const publishedCount = forms.filter((f) => f.status === "published").length;
-  if (publishedCount > 0) return null;
-
-  return (
-    <div
-      className="rounded-[10px] mb-3 px-3.5 py-2.5 flex items-center gap-3"
-      style={{
-        background: "#FFFCEB",
-        border: "1px solid #E0CC95",
-      }}
-    >
-      <span
-        className="inline-flex items-center justify-center flex-shrink-0"
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: 6,
-          background: "linear-gradient(135deg, #C9A86A 0%, #8A6300 100%)",
-          color: "#FFF",
-        }}
-      >
-        <FileText size={12} />
-      </span>
-      <div className="flex-1 text-[11.5px] leading-[1.5]">
-        <strong className="text-text-primary">No published form yet.</strong>{" "}
-        Meta won&apos;t let any campaign go live without a lead form attached.
-        {forms.length > 0 && (
-          <>
-            {" "}
-            You have {forms.length} draft form
-            {forms.length === 1 ? "" : "s"} — publish at least one to unblock.
-          </>
-        )}
-      </div>
-      <button
-        type="button"
-        onClick={onGoToForms}
-        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] font-medium flex-shrink-0"
-        style={{
-          background: "linear-gradient(135deg, #7C3AED 0%, #C026D3 100%)",
-          color: "#FFF",
-          border: "1px solid transparent",
-        }}
-      >
-        Go to Forms →
-      </button>
-    </div>
-  );
-}
