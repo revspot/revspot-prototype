@@ -1,23 +1,26 @@
 "use client";
 
-// Campaigns dashboard — rebuilt.
+// Campaigns dashboard — read-only hierarchical view.
 //
-// Read-only by design: every row is a hierarchical entity (Campaign →
-// Ad Set → Ad). The only edit paths Revspot supports are:
-//   · "Open in Meta" — a tiny inline arrow next to the row name
-//   · "Ask Spot to edit" — a small button with the SpotMark
+// Three things make this view dense without being cluttered:
 //
-// The old version had a wide Actions column and a separate Status
-// column. Both ate space we'd rather use for metrics + trends. This
-// version pushes Open in Meta into the row name itself (inline ↗),
-// makes Status a small dot/pill in the leftmost column, and devotes
-// the rest of the row to dense metrics with up/down trend deltas.
+//   1) Configurable metrics — every column past Name/Health is picked
+//      from a Metrics dropdown. Default shows the 7 columns that
+//      matter most; the user can add Verified, Qualified count, CPC,
+//      Impressions, etc.
 //
-// Top-of-page controls:
-//   · Global date range (Last 7d / 30d / 90d)
-//   · Product filter (defaults to All, or a Guyju's product)
-//   · Channel filter (All / Meta / Google) — also reflected on every
-//     row via a small brand-coloured mark before the campaign name.
+//   2) Trend deltas everywhere — top stat cards and every row cell
+//      carry a ↑/↓ % delta vs the prior period. Cost metrics invert
+//      colour (lower is better).
+//
+//   3) Per-row inline actions — no separate "Actions" column. Open in
+//      Meta is a tiny inline ↗. "Edit" is a filled black SpotMark
+//      pill — visually distinct so people notice they CAN ask Spot
+//      to change anything, but small enough not to dominate.
+//
+// Top-of-page controls, left → right:
+//   · Product filter   · Channel filter   · Metrics picker   · Search
+// And on the right edge: Global date range (conventional placement).
 
 import { useMemo, useState } from "react";
 import {
@@ -33,6 +36,7 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Sliders,
 } from "lucide-react";
 import { SpotMark } from "@/components/spot/spot-mark";
 import { useSpotStore } from "@/lib/spot/store";
@@ -44,6 +48,8 @@ import {
   type EdTechCampaign,
   type EdTechCampaignStatus,
   type EdTechHealth,
+  type EdTechMetrics,
+  type EdTechMetricDeltas,
   type TrendDelta,
 } from "@/lib/campaigns-edtech";
 
@@ -93,6 +99,161 @@ function num(n: number) {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return n.toLocaleString("en-IN");
 }
+function pct(n: number) {
+  if (n === 0) return "—";
+  return `${n.toFixed(1)}%`;
+}
+
+/* ─── Metric catalog — the configurable column set ──────────────── */
+
+/** Every metric the user can pin to the table. Each carries a label,
+ *  the matching value + delta key, how to render it, whether it's a
+ *  cost (lower is better), and how wide the column should be. */
+type MetricKey =
+  | "spend"
+  | "impressions"
+  | "cpm"
+  | "ctr"
+  | "cpc"
+  | "leads"
+  | "cpl"
+  | "verified"
+  | "verificationRate"
+  | "qualified"
+  | "qualificationRate"
+  | "costPerQualified";
+
+type MetricDef = {
+  key: MetricKey;
+  label: string;
+  /** Shorter label for the column header — defaults to `label`. */
+  short?: string;
+  /** Column width in px. */
+  width: number;
+  /** Render the metric value from a metrics object to a string. */
+  format: (m: EdTechMetrics) => string;
+  /** Which delta to read from EdTechMetricDeltas. */
+  deltaKey: keyof EdTechMetricDeltas;
+};
+
+const METRIC_DEFS: Record<MetricKey, MetricDef> = {
+  spend: {
+    key: "spend",
+    label: "Spend",
+    width: 88,
+    format: (m) => inr(m.spend),
+    deltaKey: "spend",
+  },
+  impressions: {
+    key: "impressions",
+    label: "Impressions",
+    short: "Impr",
+    width: 80,
+    format: (m) => num(m.impressions),
+    deltaKey: "impressions",
+  },
+  cpm: {
+    key: "cpm",
+    label: "CPM",
+    width: 70,
+    format: (m) => inr(m.cpm),
+    deltaKey: "cpm",
+  },
+  ctr: {
+    key: "ctr",
+    label: "CTR",
+    width: 70,
+    format: (m) => `${m.ctr.toFixed(2)}%`,
+    deltaKey: "ctr",
+  },
+  cpc: {
+    key: "cpc",
+    label: "CPC",
+    width: 70,
+    format: (m) => inr(m.cpc),
+    deltaKey: "cpc",
+  },
+  leads: {
+    key: "leads",
+    label: "Leads",
+    width: 78,
+    format: (m) => num(m.leads),
+    deltaKey: "leads",
+  },
+  cpl: {
+    key: "cpl",
+    label: "CPL",
+    width: 78,
+    format: (m) => inr(m.cpl),
+    deltaKey: "cpl",
+  },
+  verified: {
+    key: "verified",
+    label: "Verified leads",
+    short: "Verified",
+    width: 84,
+    format: (m) => num(m.verified),
+    deltaKey: "verified",
+  },
+  verificationRate: {
+    key: "verificationRate",
+    label: "Verification rate",
+    short: "Verif %",
+    width: 78,
+    format: (m) => pct(m.verificationRate),
+    deltaKey: "verificationRate",
+  },
+  qualified: {
+    key: "qualified",
+    label: "Qualified leads",
+    short: "Qualified",
+    width: 86,
+    format: (m) => num(m.qualified),
+    deltaKey: "qualified",
+  },
+  qualificationRate: {
+    key: "qualificationRate",
+    label: "Qualification rate",
+    short: "Qual %",
+    width: 78,
+    format: (m) => pct(m.qualificationRate),
+    deltaKey: "qualificationRate",
+  },
+  costPerQualified: {
+    key: "costPerQualified",
+    label: "Cost / qualified lead",
+    short: "CPQL",
+    width: 90,
+    format: (m) => inr(m.costPerQualified),
+    deltaKey: "costPerQualified",
+  },
+};
+
+// Default columns — match the prior layout so first-time users see
+// what they're used to. Metric picker lets them deviate.
+const DEFAULT_METRICS: MetricKey[] = [
+  "spend",
+  "leads",
+  "cpl",
+  "qualified",
+  "qualificationRate",
+  "costPerQualified",
+];
+
+const ALL_METRIC_KEYS: MetricKey[] = [
+  "spend",
+  "impressions",
+  "cpm",
+  "ctr",
+  "cpc",
+  "leads",
+  "cpl",
+  "verified",
+  "verificationRate",
+  "qualified",
+  "qualificationRate",
+  "costPerQualified",
+];
 
 /* ─── Date range ────────────────────────────────────────────────── */
 
@@ -115,6 +276,7 @@ export default function CampaignsPage() {
   const [productId, setProductId] = useState<"all" | string>("all");
   const [channel, setChannel] = useState<ChannelFilterValue>("all");
   const [range, setRange] = useState<DateRange>("30d");
+  const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(DEFAULT_METRICS);
 
   const toggle = (id: string) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
 
@@ -130,43 +292,91 @@ export default function CampaignsPage() {
     });
   }, [query, productId, channel]);
 
-  // Roll-ups across the filtered set.
-  const totalSpend = filtered.reduce((s, c) => s + c.metrics.spend, 0);
-  const totalLeads = filtered.reduce((s, c) => s + c.metrics.leads, 0);
-  const totalQual = filtered.reduce((s, c) => s + c.metrics.qualified, 0);
+  // Roll-ups — totals + a weighted-by-current-value blended delta so
+  // the top cards aren't just dead numbers. Each card delta is the
+  // sum(metric · delta) / sum(metric) across the filtered set.
+  const rollup = useMemo(() => {
+    const sumMetric = (k: keyof EdTechMetrics) =>
+      filtered.reduce((s, c) => s + (c.metrics[k] as number), 0);
+    const weightedDelta = (k: keyof EdTechMetricDeltas, valueKey: keyof EdTechMetrics) => {
+      const total = sumMetric(valueKey);
+      if (!total) return 0;
+      const weighted =
+        filtered.reduce(
+          (s, c) => s + (c.metrics[valueKey] as number) * c.deltas[k].pct,
+          0,
+        ) / total;
+      return +weighted.toFixed(1);
+    };
+    const spend = sumMetric("spend");
+    const leads = sumMetric("leads");
+    const verified = sumMetric("verified");
+    const qualified = sumMetric("qualified");
+    const blendedCpl = leads ? Math.round(spend / leads) : 0;
+    const blendedCpql = qualified ? Math.round(spend / qualified) : 0;
+    // Blended CPL/CPQL deltas: derived from spend vs leads deltas;
+    // approximating because we don't have prior-period absolute values.
+    const spendDelta = weightedDelta("spend", "spend");
+    const leadsDelta = weightedDelta("leads", "leads");
+    const qualifiedDelta = weightedDelta("qualified", "qualified");
+    const verifiedDelta = weightedDelta("verified", "verified");
+    // Cost delta ≈ spend% − leads% (rough but useful directionally).
+    const blendedCplDelta = +((spendDelta - leadsDelta) || 0).toFixed(1);
+    const blendedCpqlDelta = +((spendDelta - qualifiedDelta) || 0).toFixed(1);
+    return {
+      spend,
+      leads,
+      verified,
+      qualified,
+      blendedCpl,
+      blendedCpql,
+      spendDelta,
+      leadsDelta,
+      qualifiedDelta,
+      verifiedDelta,
+      blendedCplDelta,
+      blendedCpqlDelta,
+    };
+  }, [filtered]);
+
   const liveCount = filtered.filter((c) => c.status === "enabled").length;
-  const blendedCpl = totalLeads ? Math.round(totalSpend / totalLeads) : 0;
-  const blendedCpql = totalQual ? Math.round(totalSpend / totalQual) : 0;
+
+  // Build the dynamic grid-template-columns string off the picked
+  // metrics. Status dot · name(flex) · ...metrics · health(120).
+  const colTemplate = useMemo(() => {
+    const metricCols = selectedMetrics.map((k) => `${METRIC_DEFS[k].width}px`).join(" ");
+    return `14px minmax(0,1.6fr) ${metricCols} 120px`;
+  }, [selectedMetrics]);
 
   return (
     <div>
-      {/* Page header */}
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="text-meta text-text-secondary mb-1">Growth · Live spend</div>
-          <h1 className="text-page-title text-text-primary">Campaigns</h1>
-          <p className="text-meta text-text-secondary mt-1 max-w-[680px]">
-            Every Meta and Google campaign in one read-only view. Spot owns the edits — tap "Ask Spot to edit" on any
-            row, or jump to Meta to make the change manually.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => askSpot("Diagnose this week across all campaigns — where should I act?")}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-button border border-border bg-white hover:border-border-hover text-[12.5px] font-medium"
-        >
-          <SpotMark size={13} />
-          Diagnose with Spot
-        </button>
+      {/* Page header — no global "Diagnose with Spot" CTA. The action
+          lives on every row instead, where the context is concrete. */}
+      <div className="mb-4">
+        <div className="text-meta text-text-secondary mb-1">Growth · Live spend</div>
+        <h1 className="text-page-title text-text-primary">Campaigns</h1>
+        <p className="text-meta text-text-secondary mt-1 max-w-[680px]">
+          Every Meta and Google campaign in one read-only view. Tap{" "}
+          <span className="inline-flex items-center align-baseline gap-0.5 px-1 py-px rounded-[4px] bg-[#111] text-[#FAFAF8] text-[10px] font-medium relative top-px">
+            <SpotMark size={8} />
+            Edit
+          </span>{" "}
+          on any row to have Spot make the change, or jump to Meta with the inline ↗.
+        </p>
       </div>
 
-      {/* Filters strip — date · product · channel · search all live at top */}
+      {/* Filters strip — product · channel · metrics · search on the
+          left; date range pinned to the right (conventional). */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
-        <DateRangeChip value={range} onChange={setRange} />
         <ProductFilter value={productId} onChange={setProductId} options={products} />
         <ChannelFilter value={channel} onChange={setChannel} />
-        <div className="relative flex-1 max-w-[280px] min-w-[160px]">
-          <Search size={13} strokeWidth={1.8} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary" />
+        <MetricsPicker selected={selectedMetrics} onChange={setSelectedMetrics} />
+        <div className="relative max-w-[260px] min-w-[160px]">
+          <Search
+            size={13}
+            strokeWidth={1.8}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary"
+          />
           <input
             type="text"
             value={query}
@@ -175,23 +385,47 @@ export default function CampaignsPage() {
             className="w-full h-8 pl-7 pr-3 rounded-button border border-border bg-white text-[12.5px] placeholder:text-text-tertiary focus:outline-none focus:border-text-primary"
           />
         </div>
-        <span className="ml-auto text-[11.5px] text-text-tertiary">
+        <span className="text-[11.5px] text-text-tertiary">
           {filtered.length} campaign{filtered.length === 1 ? "" : "s"} · {liveCount} live
         </span>
+        {/* Spacer pushes date range to the right edge. */}
+        <span className="flex-1" />
+        <DateRangeChip value={range} onChange={setRange} />
       </div>
 
-      {/* Roll-up strip */}
+      {/* Roll-up strip — each card now carries a trend delta so they
+          don't read as static numbers. */}
       <div className="grid grid-cols-5 gap-2.5 mb-4">
-        <Stat label="Spend" value={inr(totalSpend)} />
-        <Stat label="Leads" value={num(totalLeads)} />
-        <Stat label="Qualified" value={num(totalQual)} />
-        <Stat label="Blended CPL" value={inr(blendedCpl)} />
-        <Stat label="Blended CPQL" value={inr(blendedCpql)} />
+        <StatCard
+          label="Spend"
+          value={inr(rollup.spend)}
+          delta={{ pct: rollup.spendDelta }}
+        />
+        <StatCard
+          label="Leads"
+          value={num(rollup.leads)}
+          delta={{ pct: rollup.leadsDelta }}
+        />
+        <StatCard
+          label="Qualified leads"
+          value={num(rollup.qualified)}
+          delta={{ pct: rollup.qualifiedDelta }}
+        />
+        <StatCard
+          label="Blended CPL"
+          value={inr(rollup.blendedCpl)}
+          delta={{ pct: rollup.blendedCplDelta, invert: true }}
+        />
+        <StatCard
+          label="Blended CPQL"
+          value={inr(rollup.blendedCpql)}
+          delta={{ pct: rollup.blendedCpqlDelta, invert: true }}
+        />
       </div>
 
       {/* Table */}
       <div className="bg-white border border-border rounded-card overflow-hidden">
-        <TableHeader />
+        <TableHeader colTemplate={colTemplate} metrics={selectedMetrics} />
         {filtered.length === 0 ? (
           <div className="px-4 py-10 text-center text-[13px] text-text-tertiary">
             No campaigns match your filters.
@@ -201,6 +435,8 @@ export default function CampaignsPage() {
             <CampaignRow
               key={c.id}
               c={c}
+              metrics={selectedMetrics}
+              colTemplate={colTemplate}
               expanded={!!expanded[c.id]}
               isAdsetExpanded={(id) => !!expanded[id]}
               onToggle={() => toggle(c.id)}
@@ -233,9 +469,8 @@ function DateRangeChip({ value, onChange }: { value: DateRange; onChange: (v: Da
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div
-            className="absolute left-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-border rounded-card shadow-card-hover py-1"
-          >
+          {/* Right-aligned since this chip lives on the right edge. */}
+          <div className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-border rounded-card shadow-card-hover py-1">
             {DATE_RANGES.map((r) => (
               <button
                 key={r.key}
@@ -329,12 +564,9 @@ function ChannelFilter({
 }
 
 /**
- * Tiny brand mark drawn inline — Meta blue rounded square with a
- * lowercase "f"; Google card with the multi-coloured "G" reduced to
- * a single brand-blue "G" on white for readability at 12-14px.
- *
- * We don't ship Lucide's deprecated brand icons; these are minimal
- * inline marks that read at glance scale.
+ * Tiny brand mark — Meta blue square with white "f", Google card with
+ * a brand-blue "G". We don't ship Lucide's deprecated brand icons;
+ * these inline marks read cleanly at 12-14px.
  */
 function ChannelMark({
   channel,
@@ -390,9 +622,7 @@ function ProductFilter({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div
-            className="absolute left-0 top-full mt-1 z-20 min-w-[240px] bg-white border border-border rounded-card shadow-card-hover py-1"
-          >
+          <div className="absolute left-0 top-full mt-1 z-20 min-w-[240px] bg-white border border-border rounded-card shadow-card-hover py-1">
             <button
               type="button"
               onClick={() => {
@@ -428,29 +658,120 @@ function ProductFilter({
   );
 }
 
+/**
+ * Metrics picker — multi-select dropdown that drives which columns
+ * the table renders. Each metric has a fixed display width pulled
+ * from METRIC_DEFS so the table layout stays predictable.
+ */
+function MetricsPicker({
+  selected,
+  onChange,
+}: {
+  selected: MetricKey[];
+  onChange: (next: MetricKey[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const set = new Set(selected);
+  const toggle = (k: MetricKey) => {
+    const next = new Set(set);
+    if (next.has(k)) {
+      // Always keep at least one metric selected.
+      if (next.size === 1) return;
+      next.delete(k);
+    } else {
+      next.add(k);
+    }
+    // Preserve canonical order so columns don't shuffle on each toggle.
+    onChange(ALL_METRIC_KEYS.filter((m) => next.has(m)));
+  };
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-button border border-border bg-white hover:border-border-hover text-[12px] font-medium text-text-primary"
+      >
+        <Sliders size={11} strokeWidth={1.7} className="text-text-secondary" />
+        {selected.length} metric{selected.length === 1 ? "" : "s"}
+        <ChevronDown size={11} strokeWidth={1.8} className="text-text-tertiary" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-20 min-w-[240px] bg-white border border-border rounded-card shadow-card-hover py-1">
+            <div className="flex items-center justify-between px-3 py-1.5 text-[10.5px] uppercase tracking-wider text-text-tertiary border-b border-border-subtle">
+              <span>Show metrics</span>
+              <button
+                type="button"
+                onClick={() => onChange(DEFAULT_METRICS)}
+                className="text-text-secondary hover:text-text-primary normal-case text-[11px] tracking-normal"
+              >
+                Reset
+              </button>
+            </div>
+            <div className="max-h-[320px] overflow-y-auto py-1">
+              {ALL_METRIC_KEYS.map((k) => {
+                const def = METRIC_DEFS[k];
+                const checked = set.has(k);
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => toggle(k)}
+                    className="w-full text-left px-3 py-1.5 hover:bg-surface-page inline-flex items-center gap-2 text-[12px]"
+                  >
+                    <span
+                      className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded-[3px] border ${
+                        checked ? "bg-text-primary border-text-primary text-[#FAFAF8]" : "border-border"
+                      }`}
+                    >
+                      {checked && (
+                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                          <path
+                            d="M1.5 4.5L3.5 6.5L7.5 2"
+                            stroke="currentColor"
+                            strokeWidth="1.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </span>
+                    <span className={checked ? "text-text-primary" : "text-text-secondary"}>
+                      {def.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ─── Table chrome ─────────────────────────────────────────────── */
 
-// Column template — narrow status pill on the left, name takes flex,
-// then dense metric columns. No standalone "Actions" column anymore;
-// the Ask Spot button is appended after the row name.
-const COLS =
-  "grid-cols-[14px_minmax(0,1.6fr)_88px_70px_70px_88px_82px_82px_92px_120px]";
-// One row to rule them all: status dot · name (+ inline actions) · spend · CPM · CTR · leads · CPL · qual rate · CPQL · health
-
-function TableHeader() {
+function TableHeader({
+  colTemplate,
+  metrics,
+}: {
+  colTemplate: string;
+  metrics: MetricKey[];
+}) {
   return (
     <div
-      className={`grid ${COLS} gap-2 px-3 py-2.5 border-b border-border bg-surface-page text-[10.5px] font-medium uppercase tracking-wider text-text-tertiary items-center`}
+      className="grid gap-2 px-3 py-2.5 border-b border-border bg-surface-page text-[10.5px] font-medium uppercase tracking-wider text-text-tertiary items-center"
+      style={{ gridTemplateColumns: colTemplate }}
     >
       <div></div>
       <div>Campaign</div>
-      <div className="text-right">Spend</div>
-      <div className="text-right">CPM</div>
-      <div className="text-right">CTR</div>
-      <div className="text-right">Leads</div>
-      <div className="text-right">CPL</div>
-      <div className="text-right">Qual %</div>
-      <div className="text-right">CPQL</div>
+      {metrics.map((k) => (
+        <div key={k} className="text-right">
+          {METRIC_DEFS[k].short ?? METRIC_DEFS[k].label}
+        </div>
+      ))}
       <div>Health</div>
     </div>
   );
@@ -460,6 +781,8 @@ function TableHeader() {
 
 function CampaignRow({
   c,
+  metrics,
+  colTemplate,
   expanded,
   isAdsetExpanded,
   onToggle,
@@ -467,6 +790,8 @@ function CampaignRow({
   askSpot,
 }: {
   c: EdTechCampaign;
+  metrics: MetricKey[];
+  colTemplate: string;
   expanded: boolean;
   isAdsetExpanded: (id: string) => boolean;
   onToggle: () => void;
@@ -476,7 +801,8 @@ function CampaignRow({
   return (
     <>
       <div
-        className={`grid ${COLS} gap-2 px-3 py-2.5 border-b border-border-subtle items-center hover-row`}
+        className="grid gap-2 px-3 py-2.5 border-b border-border-subtle items-center hover-row"
+        style={{ gridTemplateColumns: colTemplate }}
       >
         <StatusDot status={c.status} />
         <NameCell
@@ -490,16 +816,16 @@ function CampaignRow({
             askSpot(`Edit campaign "${c.name}" — diagnose and propose the change, then apply on Meta.`)
           }
         />
-        <MetricCell value={inr(c.metrics.spend)} delta={c.deltas.spend} />
-        <MetricCell value={inr(c.metrics.cpm)} delta={c.deltas.cpm} />
-        <MetricCell value={`${c.metrics.ctr.toFixed(2)}%`} delta={c.deltas.ctr} />
-        <MetricCell value={num(c.metrics.leads)} delta={c.deltas.leads} />
-        <MetricCell value={inr(c.metrics.cpl)} delta={c.deltas.cpl} />
-        <MetricCell
-          value={c.metrics.qualificationRate ? `${c.metrics.qualificationRate.toFixed(1)}%` : "—"}
-          delta={c.deltas.qualificationRate}
-        />
-        <MetricCell value={inr(c.metrics.costPerQualified)} delta={c.deltas.costPerQualified} />
+        {metrics.map((k) => {
+          const def = METRIC_DEFS[k];
+          return (
+            <MetricCell
+              key={k}
+              value={def.format(c.metrics)}
+              delta={c.deltas[def.deltaKey]}
+            />
+          );
+        })}
         <HealthCell health={c.health} />
       </div>
 
@@ -509,6 +835,8 @@ function CampaignRow({
             key={a.id}
             a={a}
             channel={c.channel}
+            metrics={metrics}
+            colTemplate={colTemplate}
             expanded={isAdsetExpanded(a.id)}
             onToggle={() => onToggleAdset(a.id)}
             askSpot={askSpot}
@@ -521,12 +849,16 @@ function CampaignRow({
 function AdSetRow({
   a,
   channel,
+  metrics,
+  colTemplate,
   expanded,
   onToggle,
   askSpot,
 }: {
   a: EdTechAdSet;
   channel: EdTechCampaign["channel"];
+  metrics: MetricKey[];
+  colTemplate: string;
   expanded: boolean;
   onToggle: () => void;
   askSpot: (q: string) => void;
@@ -534,7 +866,8 @@ function AdSetRow({
   return (
     <>
       <div
-        className={`grid ${COLS} gap-2 px-3 py-2 border-b border-border-subtle items-center hover-row bg-[#FAFAFA]`}
+        className="grid gap-2 px-3 py-2 border-b border-border-subtle items-center hover-row bg-[#FAFAFA]"
+        style={{ gridTemplateColumns: colTemplate }}
       >
         <StatusDot status={a.status} />
         <NameCell
@@ -548,28 +881,44 @@ function AdSetRow({
           indent={1}
           dense
         />
-        <MetricCell value={inr(a.metrics.spend)} delta={a.deltas.spend} dense />
-        <MetricCell value={inr(a.metrics.cpm)} delta={a.deltas.cpm} dense />
-        <MetricCell value={`${a.metrics.ctr.toFixed(2)}%`} delta={a.deltas.ctr} dense />
-        <MetricCell value={num(a.metrics.leads)} delta={a.deltas.leads} dense />
-        <MetricCell value={inr(a.metrics.cpl)} delta={a.deltas.cpl} dense />
-        <MetricCell
-          value={`${a.metrics.qualificationRate.toFixed(1)}%`}
-          delta={a.deltas.qualificationRate}
-          dense
-        />
-        <MetricCell value={inr(a.metrics.costPerQualified)} delta={a.deltas.costPerQualified} dense />
+        {metrics.map((k) => {
+          const def = METRIC_DEFS[k];
+          return (
+            <MetricCell
+              key={k}
+              value={def.format(a.metrics)}
+              delta={a.deltas[def.deltaKey]}
+              dense
+            />
+          );
+        })}
         <div />
       </div>
-      {expanded && a.ads.map((ad) => <AdRow key={ad.id} ad={ad} askSpot={askSpot} />)}
+      {expanded &&
+        a.ads.map((ad) => (
+          <AdRow key={ad.id} ad={ad} metrics={metrics} colTemplate={colTemplate} askSpot={askSpot} />
+        ))}
     </>
   );
 }
 
-function AdRow({ ad, askSpot }: { ad: EdTechAd; askSpot: (q: string) => void }) {
+function AdRow({
+  ad,
+  metrics,
+  colTemplate,
+  askSpot,
+}: {
+  ad: EdTechAd;
+  metrics: MetricKey[];
+  colTemplate: string;
+  askSpot: (q: string) => void;
+}) {
   const KIcon = KIND_ICON[ad.kind];
   return (
-    <div className={`grid ${COLS} gap-2 px-3 py-1.5 border-b border-border-subtle items-center hover-row bg-white`}>
+    <div
+      className="grid gap-2 px-3 py-1.5 border-b border-border-subtle items-center hover-row bg-white"
+      style={{ gridTemplateColumns: colTemplate }}
+    >
       <StatusDot status={ad.status} />
       <div className="flex items-center gap-2 min-w-0 pl-9">
         <KIcon size={11} strokeWidth={1.6} className="text-text-tertiary flex-shrink-0" />
@@ -585,28 +934,25 @@ function AdRow({ ad, askSpot }: { ad: EdTechAd; askSpot: (q: string) => void }) 
           >
             <ArrowUpRight size={11} strokeWidth={1.8} />
           </a>
-          <button
-            type="button"
-            onClick={() => askSpot(`Swap creative or copy on ad "${ad.name}". Propose and apply on Meta.`)}
-            className="inline-flex items-center gap-1 h-5 px-1.5 rounded-[5px] hover:bg-surface-secondary text-text-tertiary hover:text-text-primary text-[10px] font-medium flex-shrink-0"
-            title="Ask Spot to edit this ad"
-          >
-            <SpotMark size={9} />
-            Edit
-          </button>
+          <EditWithSpotButton
+            onClick={() =>
+              askSpot(`Swap creative or copy on ad "${ad.name}". Propose and apply on Meta.`)
+            }
+            dense
+          />
         </div>
       </div>
-      <MetricCell value={inr(ad.metrics.spend)} delta={ad.deltas.spend} dense />
-      <MetricCell value={inr(ad.metrics.cpm)} delta={ad.deltas.cpm} dense />
-      <MetricCell value={`${ad.metrics.ctr.toFixed(2)}%`} delta={ad.deltas.ctr} dense />
-      <MetricCell value={num(ad.metrics.leads)} delta={ad.deltas.leads} dense />
-      <MetricCell value={inr(ad.metrics.cpl)} delta={ad.deltas.cpl} dense />
-      <MetricCell
-        value={`${ad.metrics.qualificationRate.toFixed(1)}%`}
-        delta={ad.deltas.qualificationRate}
-        dense
-      />
-      <MetricCell value={inr(ad.metrics.costPerQualified)} delta={ad.deltas.costPerQualified} dense />
+      {metrics.map((k) => {
+        const def = METRIC_DEFS[k];
+        return (
+          <MetricCell
+            key={k}
+            value={def.format(ad.metrics)}
+            delta={ad.deltas[def.deltaKey]}
+            dense
+          />
+        );
+      })}
       <div />
     </div>
   );
@@ -623,6 +969,35 @@ function StatusDot({ status }: { status: EdTechCampaignStatus }) {
     >
       <span className={`w-2 h-2 rounded-full ${STATUS_DOT[status]} inline-block`} />
     </div>
+  );
+}
+
+/**
+ * "Edit with Spot" — a filled black pill carrying the SpotMark.
+ * Distinguished enough that users notice they can ask Spot to change
+ * anything; small enough that it doesn't compete with row metrics.
+ *
+ * Replaces the earlier ghost-style button, which was easy to miss.
+ */
+function EditWithSpotButton({
+  onClick,
+  dense,
+}: {
+  onClick: () => void;
+  dense?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-[5px] bg-[#111] text-[#FAFAF8] hover:bg-black font-medium flex-shrink-0 ${
+        dense ? "h-[18px] px-1.5 text-[10px]" : "h-[20px] px-1.5 text-[10.5px]"
+      }`}
+      title="Ask Spot to edit"
+    >
+      <SpotMark size={dense ? 9 : 10} />
+      Edit
+    </button>
   );
 }
 
@@ -679,18 +1054,7 @@ function NameCell({
           >
             <ArrowUpRight size={11} strokeWidth={1.8} />
           </a>
-          {/* Inline Ask Spot — small button, SpotMark only — no separate logo */}
-          <button
-            type="button"
-            onClick={onAskSpot}
-            className={`inline-flex items-center gap-1 rounded-[5px] hover:bg-surface-secondary text-text-tertiary hover:text-text-primary font-medium flex-shrink-0 ${
-              dense ? "h-5 px-1.5 text-[10px]" : "h-5 px-1.5 text-[10.5px]"
-            }`}
-            title="Ask Spot to edit"
-          >
-            <SpotMark size={9} />
-            Edit
-          </button>
+          <EditWithSpotButton onClick={onAskSpot} dense={dense} />
         </div>
         <div className={`text-text-tertiary truncate ${dense ? "text-[10.5px]" : "text-[11px]"} mt-0.5`}>
           {sub}
@@ -701,10 +1065,10 @@ function NameCell({
 }
 
 /**
- * Metric value + trend arrow. Trend arrows are coloured:
+ * Metric value + trend arrow. Colour:
  *   · ↑ green / ↓ red for positive metrics (leads, CTR, qual rate)
  *   · ↑ red / ↓ green for cost metrics (CPL, CPM, CPQL — `invert: true`)
- * Zero / no-data renders a flat dash (—).
+ * Zero / no-data renders a flat dash.
  */
 function MetricCell({
   value,
@@ -715,42 +1079,72 @@ function MetricCell({
   delta: TrendDelta;
   dense?: boolean;
 }) {
-  const pct = delta.pct;
-  const isZero = Math.abs(pct) < 0.5;
-  // "good" = arrow direction colour: for normal metrics up is good.
-  // For invert metrics (costs), down is good.
-  const good = delta.invert ? pct < 0 : pct > 0;
-  const Icon = isZero ? Minus : pct > 0 ? TrendingUp : TrendingDown;
+  return (
+    <div className="text-right">
+      <div className={`tabular text-text-primary ${dense ? "text-[12px]" : "text-[12.5px]"}`}>{value}</div>
+      {value !== "—" && <TrendDeltaBadge delta={delta} className="mt-0.5" />}
+    </div>
+  );
+}
+
+/** Shared inline trend badge — used in MetricCell + StatCard. */
+function TrendDeltaBadge({
+  delta,
+  className = "",
+  size = "sm",
+}: {
+  delta: TrendDelta;
+  className?: string;
+  size?: "sm" | "md";
+}) {
+  const pctNum = delta.pct;
+  const isZero = Math.abs(pctNum) < 0.5;
+  const good = delta.invert ? pctNum < 0 : pctNum > 0;
+  const Icon = isZero ? Minus : pctNum > 0 ? TrendingUp : TrendingDown;
   const color = isZero
     ? "text-text-tertiary"
     : good
       ? "text-[#15803D]"
       : "text-[#B91C1C]";
-
   return (
-    <div className="text-right">
-      <div className={`tabular text-text-primary ${dense ? "text-[12px]" : "text-[12.5px]"}`}>{value}</div>
-      {value !== "—" && (
-        <div className={`inline-flex items-center gap-0.5 text-[10px] tabular ${color} mt-0.5`}>
-          <Icon size={9} strokeWidth={2} />
-          <span>{isZero ? "0%" : `${Math.abs(pct).toFixed(1)}%`}</span>
-        </div>
+    <div
+      className={`inline-flex items-center gap-0.5 tabular ${color} ${className} ${
+        size === "md" ? "text-[11px]" : "text-[10px]"
+      }`}
+    >
+      <Icon size={size === "md" ? 11 : 9} strokeWidth={2} />
+      <span>{isZero ? "0%" : `${Math.abs(pctNum).toFixed(1)}%`}</span>
+      {size === "md" && (
+        <span className="text-text-tertiary ml-0.5 text-[10.5px]">vs prior</span>
       )}
     </div>
   );
 }
 
 function HealthCell({ health }: { health: EdTechHealth }) {
-  return (
-    <span className={`pill ${HEALTH_TONE[health]}`}>{HEALTH_LABEL[health]}</span>
-  );
+  return <span className={`pill ${HEALTH_TONE[health]}`}>{HEALTH_LABEL[health]}</span>;
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+/**
+ * Top-of-page stat card — value + label + an inline trend badge.
+ * Trend lifts the cards from "static numbers" to "movement".
+ */
+function StatCard({
+  label,
+  value,
+  delta,
+}: {
+  label: string;
+  value: string | number;
+  delta: TrendDelta;
+}) {
   return (
     <div className="bg-white border border-border rounded-card p-2.5">
       <div className="text-[11px] text-text-tertiary mb-0.5">{label}</div>
-      <div className="text-[16px] font-medium text-text-primary tabular">{value}</div>
+      <div className="flex items-baseline gap-2">
+        <div className="text-[18px] font-medium text-text-primary tabular leading-tight">{value}</div>
+      </div>
+      <TrendDeltaBadge delta={delta} size="md" className="mt-1" />
     </div>
   );
 }

@@ -41,13 +41,19 @@ export type EdTechMetrics = {
   costPerQualified: number;
 };
 
-/** Same shape, % deltas vs prior period. */
+/** Same shape, % deltas vs prior period — one for every metric the
+ *  picker can surface, so any column the user adds has a delta. */
 export type EdTechMetricDeltas = {
   spend: TrendDelta;
+  impressions: TrendDelta;
   cpm: TrendDelta;
   ctr: TrendDelta;
+  cpc: TrendDelta;
   leads: TrendDelta;
   cpl: TrendDelta;
+  verified: TrendDelta;
+  verificationRate: TrendDelta;
+  qualified: TrendDelta;
   qualificationRate: TrendDelta;
   costPerQualified: TrendDelta;
 };
@@ -112,10 +118,15 @@ function jitterDeltas(d: EdTechMetricDeltas): EdTechMetricDeltas {
   const j = (pct: number) => +(pct + (Math.random() - 0.5) * 4).toFixed(1);
   return {
     spend: { pct: j(d.spend.pct) },
+    impressions: { pct: j(d.impressions.pct) },
     cpm: { pct: j(d.cpm.pct), invert: true },
     ctr: { pct: j(d.ctr.pct) },
+    cpc: { pct: j(d.cpc.pct), invert: true },
     leads: { pct: j(d.leads.pct) },
     cpl: { pct: j(d.cpl.pct), invert: true },
+    verified: { pct: j(d.verified.pct) },
+    verificationRate: { pct: j(d.verificationRate.pct) },
+    qualified: { pct: j(d.qualified.pct) },
     qualificationRate: { pct: j(d.qualificationRate.pct) },
     costPerQualified: { pct: j(d.costPerQualified.pct), invert: true },
   };
@@ -141,9 +152,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 84, qualificationRate: 13.7, costPerQualified: 2595,
     },
     deltas: {
-      spend: { pct: 12.4 }, cpm: { pct: -3.1, invert: true }, ctr: { pct: 8.6 },
+      spend: { pct: 12.4 }, impressions: { pct: 15.8 }, cpm: { pct: -3.1, invert: true },
+      ctr: { pct: 8.6 }, cpc: { pct: -6.2, invert: true },
       leads: { pct: 18.2 }, cpl: { pct: -5.4, invert: true },
-      qualificationRate: { pct: 4.8 }, costPerQualified: { pct: -9.8, invert: true },
+      verified: { pct: 22.1 }, verificationRate: { pct: 3.4 },
+      qualified: { pct: 26.4 }, qualificationRate: { pct: 4.8 },
+      costPerQualified: { pct: -9.8, invert: true },
     },
     adsets: [],
   },
@@ -163,9 +177,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 79, qualificationRate: 14.4, costPerQualified: 2329,
     },
     deltas: {
-      spend: { pct: 6.8 }, cpm: { pct: 1.2, invert: true }, ctr: { pct: 14.2 },
+      spend: { pct: 6.8 }, impressions: { pct: 18.4 }, cpm: { pct: 1.2, invert: true },
+      ctr: { pct: 14.2 }, cpc: { pct: -10.8, invert: true },
       leads: { pct: 22.6 }, cpl: { pct: -12.8, invert: true },
-      qualificationRate: { pct: 7.1 }, costPerQualified: { pct: -14.6, invert: true },
+      verified: { pct: 28.2 }, verificationRate: { pct: 4.6 },
+      qualified: { pct: 31.4 }, qualificationRate: { pct: 7.1 },
+      costPerQualified: { pct: -14.6, invert: true },
     },
     adsets: [],
   },
@@ -185,9 +202,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 64, qualificationRate: 13.1, costPerQualified: 2219,
     },
     deltas: {
-      spend: { pct: 4.2 }, cpm: { pct: 0.6, invert: true }, ctr: { pct: 5.4 },
+      spend: { pct: 4.2 }, impressions: { pct: 3.6 }, cpm: { pct: 0.6, invert: true },
+      ctr: { pct: 5.4 }, cpc: { pct: -4.7, invert: true },
       leads: { pct: 9.8 }, cpl: { pct: -5.1, invert: true },
-      qualificationRate: { pct: -1.2 }, costPerQualified: { pct: 3.9, invert: true },
+      verified: { pct: 8.2 }, verificationRate: { pct: -1.5 },
+      qualified: { pct: 8.4 }, qualificationRate: { pct: -1.2 },
+      costPerQualified: { pct: 3.9, invert: true },
     },
     adsets: [],
   },
@@ -207,9 +227,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 21, qualificationRate: 10.9, costPerQualified: 4667,
     },
     deltas: {
-      spend: { pct: -2.4 }, cpm: { pct: 1.8, invert: true }, ctr: { pct: -3.6 },
+      spend: { pct: -2.4 }, impressions: { pct: -4.6 }, cpm: { pct: 1.8, invert: true },
+      ctr: { pct: -3.6 }, cpc: { pct: 4.8, invert: true },
       leads: { pct: -8.2 }, cpl: { pct: 6.4, invert: true },
-      qualificationRate: { pct: -2.8 }, costPerQualified: { pct: 9.2, invert: true },
+      verified: { pct: -11.4 }, verificationRate: { pct: -3.6 },
+      qualified: { pct: -10.8 }, qualificationRate: { pct: -2.8 },
+      costPerQualified: { pct: 9.2, invert: true },
     },
     adsets: [],
   },
@@ -231,9 +254,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 46, qualificationRate: 9.5, costPerQualified: 6435,
     },
     deltas: {
-      spend: { pct: 18.4 }, cpm: { pct: 8.2, invert: true }, ctr: { pct: -6.8 },
+      spend: { pct: 18.4 }, impressions: { pct: 9.8 }, cpm: { pct: 8.2, invert: true },
+      ctr: { pct: -6.8 }, cpc: { pct: 16.4, invert: true },
       leads: { pct: 4.2 }, cpl: { pct: 13.4, invert: true },
-      qualificationRate: { pct: -3.6 }, costPerQualified: { pct: 18.9, invert: true },
+      verified: { pct: 0.4 }, verificationRate: { pct: -3.8 },
+      qualified: { pct: 0.6 }, qualificationRate: { pct: -3.6 },
+      costPerQualified: { pct: 18.9, invert: true },
     },
     adsets: [],
   },
@@ -253,9 +279,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 32, qualificationRate: 10.6, costPerQualified: 6000,
     },
     deltas: {
-      spend: { pct: 9.4 }, cpm: { pct: 4.8, invert: true }, ctr: { pct: -2.4 },
+      spend: { pct: 9.4 }, impressions: { pct: 6.8 }, cpm: { pct: 4.8, invert: true },
+      ctr: { pct: -2.4 }, cpc: { pct: 7.3, invert: true },
       leads: { pct: 2.8 }, cpl: { pct: 6.4, invert: true },
-      qualificationRate: { pct: 1.4 }, costPerQualified: { pct: 4.6, invert: true },
+      verified: { pct: 4.2 }, verificationRate: { pct: 1.4 },
+      qualified: { pct: 4.6 }, qualificationRate: { pct: 1.4 },
+      costPerQualified: { pct: 4.6, invert: true },
     },
     adsets: [],
   },
@@ -277,9 +306,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 19, qualificationRate: 6.6, costPerQualified: 9895,
     },
     deltas: {
-      spend: { pct: 22.6 }, cpm: { pct: 14.2, invert: true }, ctr: { pct: -12.4 },
+      spend: { pct: 22.6 }, impressions: { pct: 12.4 }, cpm: { pct: 14.2, invert: true },
+      ctr: { pct: -12.4 }, cpc: { pct: 28.8, invert: true },
       leads: { pct: -4.8 }, cpl: { pct: 28.6, invert: true },
-      qualificationRate: { pct: -8.4 }, costPerQualified: { pct: 36.4, invert: true },
+      verified: { pct: -14.2 }, verificationRate: { pct: -9.8 },
+      qualified: { pct: -16.4 }, qualificationRate: { pct: -8.4 },
+      costPerQualified: { pct: 36.4, invert: true },
     },
     adsets: [],
   },
@@ -299,9 +331,12 @@ export const edTechCampaigns: EdTechCampaign[] = [
       qualified: 0, qualificationRate: 0, costPerQualified: 0,
     },
     deltas: {
-      spend: { pct: 0 }, cpm: { pct: 0, invert: true }, ctr: { pct: 0 },
+      spend: { pct: 0 }, impressions: { pct: 0 }, cpm: { pct: 0, invert: true },
+      ctr: { pct: 0 }, cpc: { pct: 0, invert: true },
       leads: { pct: 0 }, cpl: { pct: 0, invert: true },
-      qualificationRate: { pct: 0 }, costPerQualified: { pct: 0, invert: true },
+      verified: { pct: 0 }, verificationRate: { pct: 0 },
+      qualified: { pct: 0 }, qualificationRate: { pct: 0 },
+      costPerQualified: { pct: 0, invert: true },
     },
     adsets: [],
   },
