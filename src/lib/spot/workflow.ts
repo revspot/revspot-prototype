@@ -1,33 +1,55 @@
 import type { SpotMessage } from "./types";
+import {
+  ANGLES_STEPS,
+  EXTENDED_STEP_LABELS,
+  EXTENDED_TOOL_CALLS,
+  OPTIMIZE_STEPS,
+  SCALE_STEPS,
+  extendedIntroMessage,
+} from "./extended-flows";
 
-// Spot launch workflow — types + mock content per step.
+// Spot workflows — types + mock content per step.
 //
-// The workflow has a fixed step sequence. The right-pane on /spot renders
-// the step's UI; the left-pane chat narrates each phase. The user
-// approves at each step, which seeds a Spot message and advances state.
+// Four workflow kinds share this engine:
+//   · launch-campaign — full launch flow (product memory → live)
+//   · scale           — analyse winners, propose scale plays
+//   · optimize        — find losers, root-cause, ship fixes
+//   · test-angles     — audit creatives, generate new angles, A/B test
 //
-// Steps:
-//   1. product-setup  — new product memory (only when no existing product)
-//   2. kickoff        — Spot greets, summarises what it knows about the product
-//   3. personas       — pull existing personas, recommend new ones, approve
-//   4. budget         — user inputs first-week budget
-//   4b. media-plan    — Spot generates a plan across channels, approve
-//   5. angles         — Spot drafts angles per persona, user approves
-//   6. forms          — landing page + lead forms readiness, approve
-//   7. campaigns      — campaign-set-ad structure ready to deploy
+// Each flow has its own STEP_ORDER. The right pane renders the active
+// step's UI; the chat narrates and carries the approval CTAs.
 
 export type WorkflowStep =
-  | "deep-research" // Spot doesn't know the product yet; auto-researches.
+  // Launch flow
+  | "deep-research"
   | "product-setup"
   | "kickoff"
   | "personas"
   | "media-plan"
   | "angles"
-  | "resize-qa" // Resize Agent + QA review per variant
+  | "resize-qa"
   | "forms"
   | "campaigns"
-  | "voice-agent" // Pick a Voice AI agent for outreach (or skip)
+  | "voice-agent"
+  // Scale flow
+  | "scale-analyze"
+  | "scale-strategies"
+  | "scale-impact"
+  | "scale-deploy"
+  // Optimize flow
+  | "opt-diagnose"
+  | "opt-root-cause"
+  | "opt-fix-plan"
+  | "opt-deploy"
+  // Test angles flow
+  | "ang-audit"
+  | "ang-insights"
+  | "ang-generate"
+  | "ang-test-plan"
+  // Shared terminal state
   | "done";
+
+export type WorkflowKind = "launch-campaign" | "scale" | "optimize" | "test-angles";
 
 export const STEP_ORDER: WorkflowStep[] = [
   "deep-research",
@@ -45,6 +67,7 @@ export const STEP_ORDER: WorkflowStep[] = [
 
 /** Labels used in the step indicator at the top of the workspace pane. */
 export const STEP_LABELS: Record<WorkflowStep, string> = {
+  // launch
   "deep-research": "Deep research",
   "product-setup": "Product memory",
   kickoff: "Kickoff",
@@ -55,10 +78,24 @@ export const STEP_LABELS: Record<WorkflowStep, string> = {
   forms: "Forms & pages",
   campaigns: "Campaign structure",
   "voice-agent": "Voice agent",
+  // extended flows — pulled from EXTENDED_STEP_LABELS so the labels
+  // live next to their per-flow mock content.
+  "scale-analyze": EXTENDED_STEP_LABELS["scale-analyze"],
+  "scale-strategies": EXTENDED_STEP_LABELS["scale-strategies"],
+  "scale-impact": EXTENDED_STEP_LABELS["scale-impact"],
+  "scale-deploy": EXTENDED_STEP_LABELS["scale-deploy"],
+  "opt-diagnose": EXTENDED_STEP_LABELS["opt-diagnose"],
+  "opt-root-cause": EXTENDED_STEP_LABELS["opt-root-cause"],
+  "opt-fix-plan": EXTENDED_STEP_LABELS["opt-fix-plan"],
+  "opt-deploy": EXTENDED_STEP_LABELS["opt-deploy"],
+  "ang-audit": EXTENDED_STEP_LABELS["ang-audit"],
+  "ang-insights": EXTENDED_STEP_LABELS["ang-insights"],
+  "ang-generate": EXTENDED_STEP_LABELS["ang-generate"],
+  "ang-test-plan": EXTENDED_STEP_LABELS["ang-test-plan"],
   done: "Live",
 };
 
-/** Steps that show in the visible step rail. */
+/** Steps that show in the visible step rail (launch flow default). */
 export const VISIBLE_STEPS: WorkflowStep[] = [
   "kickoff",
   "personas",
@@ -69,6 +106,22 @@ export const VISIBLE_STEPS: WorkflowStep[] = [
   "campaigns",
   "voice-agent",
 ];
+
+/** Per-kind step order. nextStep() reads this off the workflow kind. */
+export const STEP_ORDER_BY_KIND: Record<WorkflowKind, readonly WorkflowStep[]> = {
+  "launch-campaign": STEP_ORDER,
+  scale: SCALE_STEPS,
+  optimize: OPTIMIZE_STEPS,
+  "test-angles": ANGLES_STEPS,
+};
+
+/** Per-kind visible step rail. */
+export const VISIBLE_STEPS_BY_KIND: Record<WorkflowKind, readonly WorkflowStep[]> = {
+  "launch-campaign": VISIBLE_STEPS,
+  scale: SCALE_STEPS.filter((s) => s !== "done"),
+  optimize: OPTIMIZE_STEPS.filter((s) => s !== "done"),
+  "test-angles": ANGLES_STEPS.filter((s) => s !== "done"),
+};
 
 export type WorkflowBudget = {
   amountInr: number;
@@ -111,16 +164,56 @@ export type LaunchWorkflow = {
   attachedVoiceAgentId: string | null;
 };
 
+/**
+ * Diagnostic workflows — Scale, Optimize, Test-Angles. All three share
+ * the same shape since they're all "Spot does an analysis, you approve
+ * the picks, Spot deploys". Each step gathers a set of selected IDs
+ * (which strategies / fixes / angles the user wants to ship).
+ */
+export type DiagnosticWorkflow = {
+  kind: "scale" | "optimize" | "test-angles";
+  step: WorkflowStep;
+  productId: string;
+  productName: string;
+  startedAt: number;
+  /** Loader → reveal gate, same pattern as LaunchWorkflow.kickoffReady. */
+  ready: boolean;
+  /** Picks the user has approved at the current step (strategy/fix/angle ids). */
+  selectedIds: string[];
+  /**
+   * For Optimize: which problem campaign the user is drilling into at
+   * the root-cause step. null until they pick one.
+   */
+  focusedProblemId: string | null;
+};
+
+/** Any workflow currently active in the Spot store. */
+export type SpotWorkflow = LaunchWorkflow | DiagnosticWorkflow;
+
 export const EMPTY_APPROVALS: WorkflowApprovals = {
   personaIds: [],
   angleIds: [],
   formIds: [],
 };
 
+/**
+ * Walk to the next step in the given workflow kind's order. Returns
+ * "done" if the current step is the last one (or not found in the
+ * kind's sequence — defensive).
+ */
+export function nextStepFor(
+  kind: WorkflowKind,
+  step: WorkflowStep,
+): WorkflowStep {
+  const order = STEP_ORDER_BY_KIND[kind];
+  const i = order.indexOf(step);
+  if (i < 0 || i >= order.length - 1) return "done";
+  return order[i + 1];
+}
+
+/** Legacy launch-only helper — kept for the existing launch flow. */
 export function nextStep(step: WorkflowStep): WorkflowStep {
-  const i = STEP_ORDER.indexOf(step);
-  if (i < 0 || i >= STEP_ORDER.length - 1) return "done";
-  return STEP_ORDER[i + 1];
+  return nextStepFor("launch-campaign", step);
 }
 
 /* ─── Mock content per step ───────────────────────────────────── */
@@ -787,6 +880,9 @@ export type StepToolCall = {
 };
 
 export const STEP_TOOL_CALL: Partial<Record<WorkflowStep, StepToolCall>> = {
+  // Extended flows — folded in from extended-flows.ts so the engine has
+  // a single tool-call map regardless of which workflow kind is active.
+  ...(EXTENDED_TOOL_CALLS as unknown as Partial<Record<WorkflowStep, StepToolCall>>),
   personas: {
     agent: "personas.lookup",
     detail: "scanning library + cross-product audience graph…",
@@ -838,8 +934,14 @@ export const STEP_TOOL_CALL: Partial<Record<WorkflowStep, StepToolCall>> = {
 
 export function stepIntroMessage(
   step: WorkflowStep,
-  w: LaunchWorkflow,
+  w: SpotWorkflow,
 ): SpotMessage | null {
+  // Extended-flow steps (scale / optimize / test-angles) have their own
+  // intro copy — dispatch to extended-flows for anything not in the
+  // launch flow's switch below.
+  if (w.kind !== "launch-campaign") {
+    return extendedIntroMessage(step, w.productName);
+  }
   switch (step) {
     case "personas":
       return {

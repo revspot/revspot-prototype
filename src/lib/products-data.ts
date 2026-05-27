@@ -421,7 +421,10 @@ export type ProductDiagnosis = {
   tone: "ok" | "warn" | "err" | "info";
   /** Primary action label for the CTA button. */
   action: string;
-  /** Spot prompt that runs when the user clicks the action. */
+  /** Which Spot workflow this action kicks off. The /spot welcome cards
+   *  dispatch on this to the right start*Flow function. */
+  flow: "scale" | "optimize" | "test-angles" | "launch";
+  /** Free-text fallback if a caller wants to use askSpot() instead. */
   prompt: string;
 };
 
@@ -440,6 +443,7 @@ export function diagnoseProduct(p: ProductSummary): ProductDiagnosis {
       chip: "Low volume · high CPL",
       tone: "err",
       action: "Test new angles",
+      flow: "test-angles",
       prompt: `Diagnose ${p.name} — volume is low and CPL is high. Suggest new angles and personas to test.`,
     };
   }
@@ -448,6 +452,7 @@ export function diagnoseProduct(p: ProductSummary): ProductDiagnosis {
       chip: "High CPL",
       tone: "warn",
       action: "Optimize campaigns",
+      flow: "optimize",
       prompt: `Optimize ${p.name} — CPL is creeping up. Find ad sets to pause and reallocate.`,
     };
   }
@@ -456,14 +461,19 @@ export function diagnoseProduct(p: ProductSummary): ProductDiagnosis {
       chip: "Low volume",
       tone: "warn",
       action: "Scale spend",
+      flow: "scale",
       prompt: `Scale ${p.name} — volume is low. Recommend budget lift and new placements.`,
     };
   }
   if (lowQual) {
+    // "Refine targeting" lands in the Optimize flow — the root-cause
+    // analysis there already covers audience / hook / landing-page
+    // mismatches that drive low qualification.
     return {
       chip: "Low qualification",
       tone: "warn",
       action: "Refine targeting",
+      flow: "optimize",
       prompt: `Refine targeting on ${p.name} — qualification rate is below 8%. Identify which cohort is leaking.`,
     };
   }
@@ -472,6 +482,7 @@ export function diagnoseProduct(p: ProductSummary): ProductDiagnosis {
     chip: "Healthy",
     tone: "ok",
     action: "Scale with Spot",
+    flow: "scale",
     prompt: `Scale ${p.name} — performance is healthy. Recommend the next budget tier + audience expansion.`,
   };
 }

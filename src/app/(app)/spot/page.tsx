@@ -637,8 +637,23 @@ function ScopeRow({
 function ActiveProductsRail() {
   const startLaunchFlow = useSpotStore((s) => s.startLaunchFlow);
   const startNewProductFlow = useSpotStore((s) => s.startNewProductFlow);
-  const askSpot = useSpotStore((s) => s.askSpot);
+  const startScaleFlow = useSpotStore((s) => s.startScaleFlow);
+  const startOptimizeFlow = useSpotStore((s) => s.startOptimizeFlow);
+  const startTestAnglesFlow = useSpotStore((s) => s.startTestAnglesFlow);
   const top = PRODUCTS.slice(0, 3);
+
+  // The chip action on each product card maps the diagnosis to a
+  // workflow kind. "Healthy" → scale (best-case action is to scale
+  // a winning product); "High CPL" → optimize; "Low volume + high CPL"
+  // → test new angles; etc. The mapping lives on the diagnosis itself
+  // (diagnoseProduct().flow).
+  const startFlow = (flow: string, p: { id: string; name: string }) => {
+    const pickFor = { id: p.id, name: p.name };
+    if (flow === "scale") startScaleFlow(pickFor);
+    else if (flow === "optimize") startOptimizeFlow(pickFor);
+    else if (flow === "test-angles") startTestAnglesFlow(pickFor);
+    else startLaunchFlow(pickFor);
+  };
 
   return (
     <div>
@@ -702,19 +717,12 @@ function ActiveProductsRail() {
                 {dx.chip}
               </span>
 
-              {/* Action — health-driven */}
+              {/* Action — health-driven · dispatches to the right Spot
+                  workflow based on diagnoseProduct().flow */}
               <div className="flex items-center gap-1 mt-auto">
                 <button
                   type="button"
-                  onClick={() => {
-                    // Healthy → straight into launch (scale a new campaign).
-                    // Anything else → talk to Spot first about the fix.
-                    if (dx.tone === "ok") {
-                      startLaunchFlow({ id: p.id, name: p.name });
-                    } else {
-                      askSpot(dx.prompt);
-                    }
-                  }}
+                  onClick={() => startFlow(dx.flow, p)}
                   className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[11.5px] font-medium"
                 >
                   {dx.action}

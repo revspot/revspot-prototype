@@ -13,6 +13,7 @@ import {
   STEP_LABELS,
   STEP_TOOL_CALL,
   VISIBLE_STEPS,
+  VISIBLE_STEPS_BY_KIND,
   LAUNCH_PERSONAS,
   SAMPLE_ANGLES,
   SAMPLE_FORMS,
@@ -23,13 +24,19 @@ import {
   generatePlan,
   type WorkflowStep,
   type LaunchWorkflow,
+  type DiagnosticWorkflow,
+  type SpotWorkflow,
   type Channel,
   type CampaignBucket,
 } from "@/lib/spot/workflow";
+import {
+  DiagnosticStep,
+} from "@/components/spot/workflow/diagnostic-steps";
 import { SpotMark } from "@/components/spot/spot-mark";
 import { PRODUCTS } from "@/lib/products-data";
 
 const STEP_ICONS: Record<WorkflowStep, typeof Users> = {
+  // Launch flow
   "deep-research": Search,
   "product-setup": Package,
   kickoff: Sparkles,
@@ -40,6 +47,22 @@ const STEP_ICONS: Record<WorkflowStep, typeof Users> = {
   forms: LayoutIcon,
   campaigns: Megaphone,
   "voice-agent": Mic,
+  // Scale flow
+  "scale-analyze": TrendingUp,
+  "scale-strategies": Sparkles,
+  "scale-impact": ChartPie,
+  "scale-deploy": PartyPopper,
+  // Optimize flow
+  "opt-diagnose": Search,
+  "opt-root-cause": ShieldAlert,
+  "opt-fix-plan": Sparkles,
+  "opt-deploy": PartyPopper,
+  // Test angles flow
+  "ang-audit": Search,
+  "ang-insights": Sparkles,
+  "ang-generate": ImageIcon,
+  "ang-test-plan": ChartPie,
+  // Shared
   done: PartyPopper,
 };
 
@@ -69,7 +92,22 @@ export function WorkflowPane() {
 
   if (!workflow) return null;
   const Icon = STEP_ICONS[workflow.step];
-  const currentIdx = VISIBLE_STEPS.indexOf(workflow.step);
+  // The visible step rail depends on the active workflow kind — each
+  // diagnostic flow has its own short rail (Analyze · Plays · Impact ·
+  // Deploy) instead of the launch flow's 8-step rail.
+  const visibleSteps = VISIBLE_STEPS_BY_KIND[workflow.kind];
+  const currentIdx = visibleSteps.indexOf(workflow.step);
+
+  // Action verb in the header changes per workflow kind so the same
+  // chrome reads correctly for every flow.
+  const headerVerb =
+    workflow.kind === "scale"
+      ? "Scaling"
+      : workflow.kind === "optimize"
+        ? "Optimizing"
+        : workflow.kind === "test-angles"
+          ? "Testing angles ·"
+          : "Launching ·";
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -79,7 +117,7 @@ export function WorkflowPane() {
           <Icon size={15} strokeWidth={1.6} className="text-text-primary" />
           <div className="flex-1 min-w-0">
             <div className="text-[11px] text-text-tertiary leading-tight">
-              Launching · {workflow.productName}
+              {headerVerb} {workflow.productName}
             </div>
             <div className="text-section-header text-text-primary leading-tight">
               {STEP_LABELS[workflow.step]}
@@ -104,7 +142,7 @@ export function WorkflowPane() {
         </div>
         {workflow.step !== "deep-research" && workflow.step !== "product-setup" && workflow.step !== "done" && (
           <div className="px-5 pb-3 flex items-center gap-1.5 overflow-x-auto">
-            {VISIBLE_STEPS.map((s, i) => {
+            {visibleSteps.map((s, i) => {
               const done = i < currentIdx;
               const active = i === currentIdx;
               const Ico = STEP_ICONS[s];
@@ -145,7 +183,7 @@ export function WorkflowPane() {
 
 /* ─── Step body router ───────────────────────────────────────── */
 
-function StepBody({ workflow }: { workflow: LaunchWorkflow }) {
+function StepBody({ workflow }: { workflow: SpotWorkflow }) {
   // When the user advances to a new step, the workflow.step flips
   // immediately but the corresponding agent (tool-call) is still
   // "running" in the chat. The right pane shows a loader during that
@@ -175,6 +213,13 @@ function StepBody({ workflow }: { workflow: LaunchWorkflow }) {
     );
   }
 
+  // Diagnostic flows (scale / optimize / test-angles) have their own
+  // step components — dispatch to DiagnosticStep which knows how to
+  // render any of their step keys.
+  if (workflow.kind !== "launch-campaign") {
+    return <DiagnosticStep workflow={workflow} />;
+  }
+
   switch (workflow.step) {
     case "deep-research":
       return <DeepResearchStep workflow={workflow} />;
@@ -198,6 +243,10 @@ function StepBody({ workflow }: { workflow: LaunchWorkflow }) {
       return <VoiceAgentStep />;
     case "done":
       return <DoneStep workflow={workflow} />;
+    default:
+      // Diagnostic-flow steps shouldn't reach here (handled above), but
+      // TypeScript needs an exhaustive default for the union.
+      return null;
   }
 }
 
@@ -976,8 +1025,13 @@ function SkeletonStat() {
 /* ─── Personas — recommended (combined existing + new) ──────── */
 
 function PersonasStep() {
-  const approvals = useSpotStore((s) => s.workflow!.approvals);
+  // PersonasStep only ever renders inside the launch flow — narrow to
+  // LaunchWorkflow so `.approvals` is type-safe.
+  const approvals = useSpotStore((s) =>
+    s.workflow && s.workflow.kind === "launch-campaign" ? s.workflow.approvals : null,
+  );
   const toggle = useSpotStore((s) => s.toggleWorkflowApproval);
+  if (!approvals) return null;
   const selectedCount = approvals.personaIds.length;
 
   return (
@@ -1199,10 +1253,14 @@ const BUCKET_PILL: Record<CampaignBucket, { label: string; pill: string }> = {
 };
 
 function MediaPlanStep() {
-  const wf = useSpotStore((s) => s.workflow)!;
+  // Launch-only step — narrow at the boundary.
+  const wf = useSpotStore((s) =>
+    s.workflow && s.workflow.kind === "launch-campaign" ? s.workflow : null,
+  );
   const setBudget = useSpotStore((s) => s.setWorkflowBudget);
   const whatsAppConnected = useSpotStore((s) => s.whatsAppConnected);
   const connectWhatsApp = useSpotStore((s) => s.connectWhatsApp);
+  if (!wf) return null;
   const channels = generatePlan(wf.budget?.amountInr || 0, whatsAppConnected);
   const totalBudget = wf.budget?.amountInr || 0;
   const days = wf.budget?.days || 7;
@@ -2412,8 +2470,12 @@ const CHANNEL_ICON: Record<"Voice" | "WhatsApp" | "SMS", typeof Mic> = {
 };
 
 function VoiceAgentStep() {
-  const workflow = useSpotStore((s) => s.workflow)!;
+  // Launch-only step.
+  const workflow = useSpotStore((s) =>
+    s.workflow && s.workflow.kind === "launch-campaign" ? s.workflow : null,
+  );
   const attachVoiceAgent = useSpotStore((s) => s.attachVoiceAgent);
+  if (!workflow) return null;
   const selected = workflow.attachedVoiceAgentId;
   // Recommend Sherpa as the default since it's the balanced fit.
   const recommendedId = "agent-sherpa";

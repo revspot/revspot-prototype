@@ -4,11 +4,14 @@ import { create } from "zustand";
 import type { GuidedKind, GuidedPayload, SpotMessage, SpotScope } from "./types";
 import {
   EMPTY_APPROVALS,
-  nextStep,
+  nextStepFor,
   stepIntroMessage,
   STEP_TOOL_CALL,
+  type DiagnosticWorkflow,
   type LaunchWorkflow,
+  type SpotWorkflow,
   type WorkflowBudget,
+  type WorkflowKind,
   type WorkflowStep,
 } from "./workflow";
 import { PRODUCTS } from "../products-data";
@@ -32,9 +35,9 @@ type PanelState = {
   // Toast
   toast: string | null;
 
-  // Launch workflow — the split-screen agentic flow on /spot.
+  // Active workflow — launch-campaign, scale, optimize, or test-angles.
   // null = no workflow active, single-column chat.
-  workflow: LaunchWorkflow | null;
+  workflow: SpotWorkflow | null;
   // Whether the right-pane canvas is visible. Workflow state is
   // preserved when this is false — the user just gets the chat wider
   // so they can read uninterrupted, like collapsing Claude's preview.
@@ -52,12 +55,22 @@ type PanelState = {
   startNewProductFlow: () => void;
   /** Spot doesn't recognise the product — fake-research it in real-time. */
   startDeepResearch: (productName: string, attachedFiles?: string[]) => void;
+  /** Start the Scale workflow against an existing product. */
+  startScaleFlow: (product: { id: string; name: string }) => void;
+  /** Start the Optimize workflow against an existing product. */
+  startOptimizeFlow: (product: { id: string; name: string }) => void;
+  /** Start the Test New Angles workflow against an existing product. */
+  startTestAnglesFlow: (product: { id: string; name: string }) => void;
   /** Advance the workflow to the next step + seed a Spot narration message. */
   advanceWorkflow: (narration?: string) => void;
   /** Jump to a specific step (used for "edit a previous step"). */
   gotoStep: (step: WorkflowStep) => void;
   setWorkflowBudget: (b: WorkflowBudget) => void;
   toggleWorkflowApproval: (group: "personaIds" | "angleIds" | "formIds", id: string) => void;
+  /** Toggle a pick at a Diagnostic step (scaling strategy / fix / angle). */
+  toggleDiagnosticPick: (id: string) => void;
+  /** Set the focused problem at the Optimize root-cause step. */
+  focusProblem: (problemId: string) => void;
   /** Pick / change the voice agent attached to outbound campaigns. */
   attachVoiceAgent: (agentId: string | null) => void;
   exitWorkflow: () => void;
@@ -89,6 +102,85 @@ type PanelState = {
 };
 
 const WORKSPACE_SCOPE: SpotScope = { kind: "workspace", label: "Workspace" };
+
+/**
+ * Build the initial state for a Diagnostic flow (Scale / Optimize /
+ * Test-Angles). All three share the structure — only the first step,
+ * tool-call narration, and intro copy differ.
+ *
+ * After the fake delay, the loader resolves: `ready` flips to true and
+ * the first step's intro message appears with its CTA.
+ */
+function startDiagnostic(
+  set: (
+    fn: (s: PanelState) => Partial<PanelState> | PanelState,
+  ) => void,
+  kind: DiagnosticWorkflow["kind"],
+  product: { id: string; name: string },
+  firstStep: WorkflowStep,
+  copy: { headline: string; intro: string },
+) {
+  const callId = `tc-${Date.now()}`;
+  const tc = STEP_TOOL_CALL[firstStep];
+
+  set(() => ({
+    open: true,
+    maximized: false,
+    canvasOpen: true,
+    viewHomeOverride: false,
+    scope: { kind: "project", label: product.name, target: product.id },
+    pendingQuery: null,
+    workflow: {
+      kind,
+      step: firstStep,
+      productId: product.id,
+      productName: product.name,
+      startedAt: Date.now(),
+      ready: false,
+      selectedIds: [],
+      focusedProblemId: null,
+    },
+    thread: [
+      {
+        role: "spot",
+        parts: [
+          { type: "headline", text: copy.headline, verdict: "info" },
+          { type: "text", text: copy.intro },
+          {
+            type: "tool-call",
+            id: callId,
+            agent: tc?.agent ?? "spot.analyze",
+            detail: tc?.detail ?? "running analysis…",
+            status: "running",
+          },
+        ],
+      },
+    ],
+  }));
+
+  // After the fake delay, reveal the canvas + drop the first step CTA.
+  setTimeout(() => {
+    set((s) => {
+      if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
+      const intro = stepIntroMessage(firstStep, s.workflow);
+      const updatedThread = s.thread.map((m) => {
+        if (m.role !== "spot") return m;
+        return {
+          ...m,
+          parts: m.parts.map((p) =>
+            p.type === "tool-call" && p.id === callId
+              ? { ...p, status: "done" as const }
+              : p,
+          ),
+        };
+      });
+      return {
+        workflow: { ...s.workflow, ready: true },
+        thread: intro ? [...updatedThread, intro] : updatedThread,
+      };
+    });
+  }, tc?.delayMs ?? 3400);
+}
 
 export const useSpotStore = create<PanelState>((set) => ({
   open: false,
@@ -165,7 +257,7 @@ export const useSpotStore = create<PanelState>((set) => ({
     // line in chat. No findings dump — the user can read the right pane.
     setTimeout(() => {
       set((s) => {
-        if (!s.workflow) return {};
+        if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
         const nextWorkflow: LaunchWorkflow = { ...s.workflow, kickoffReady: true };
         const updatedThread = s.thread.map((m) => {
           if (m.role !== "spot") return m;
@@ -299,7 +391,7 @@ export const useSpotStore = create<PanelState>((set) => ({
     // After a beat, finish the research, synthesise memory, advance to kickoff.
     setTimeout(() => {
       set((s) => {
-        if (!s.workflow) return {};
+        if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
         const researched: import("./workflow").ResearchedMemory = {
           tagline: `${productName} — fresh research from Spot. Memory pre-filled; edit any field in chat.`,
           usps: [
@@ -366,30 +458,39 @@ export const useSpotStore = create<PanelState>((set) => ({
     }, 2800);
   },
 
+  // Diagnostic workflows — Scale, Optimize, Test-Angles. They all share
+  // the same shape, so a helper builds the initial state. The chat opens
+  // with a "what I'm about to do" line + a running tool-call for the
+  // first step. The right pane shows a loader; once the tool-call
+  // resolves it reveals the analysis canvas + the first step CTA.
+  startScaleFlow: (product) => {
+    startDiagnostic(set, "scale", product, "scale-analyze", {
+      headline: `Scaling ${product.name}.`,
+      intro:
+        "Pulling 30-day performance — I'll figure out what's winning, then propose how to scale it without breaking it.",
+    });
+  },
+  startOptimizeFlow: (product) => {
+    startDiagnostic(set, "optimize", product, "opt-diagnose", {
+      headline: `Optimizing ${product.name}.`,
+      intro:
+        "Sweeping campaigns for what's underperforming — both recent decay and chronic losers. I'll separate the two and find the actual root cause.",
+    });
+  },
+  startTestAnglesFlow: (product) => {
+    startDiagnostic(set, "test-angles", product, "ang-audit", {
+      headline: `Testing new angles · ${product.name}.`,
+      intro:
+        "Auditing every creative from the last 30 days first. I want to know what's winning and exactly why — every new angle I draft will build on a real insight, not a guess.",
+    });
+  },
+
   advanceWorkflow: (narration) =>
     set((s) => {
       if (!s.workflow) return {};
-      const upcoming = nextStep(s.workflow.step);
+      const upcoming = nextStepFor(s.workflow.kind, s.workflow.step);
       const tc = STEP_TOOL_CALL[upcoming];
       const callId = `tc-${Date.now()}`;
-      // Pre-select sensible defaults so the user sees selected state
-      // immediately on entering a step (clearer than "0 selected").
-      const preselectFor = (
-        step: WorkflowStep,
-        current: typeof s.workflow.approvals,
-      ) => {
-        if (step === "personas" && current.personaIds.length === 0) {
-          // Import lazily to avoid a circular ref at module top-level.
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { LAUNCH_PERSONAS } = require("./workflow") as typeof import("./workflow");
-          const existing = LAUNCH_PERSONAS.filter(
-            (p: { origin: string }) => p.origin === "existing",
-          ).map((p: { id: string }) => p.id);
-          return { ...current, personaIds: existing };
-        }
-        return current;
-      };
-
       // Flip the workflow step IMMEDIATELY so the right pane swaps to
       // the *next* step's canvas (which renders a loader while the
       // tool-call narrates in chat). Then after the fake delay, flip
@@ -399,11 +500,27 @@ export const useSpotStore = create<PanelState>((set) => ({
         appended.push({ role: "spot", parts: [{ type: "text", text: narration }] });
       }
 
-      const nextWorkflow: LaunchWorkflow = {
-        ...s.workflow,
-        step: upcoming,
-        approvals: preselectFor(upcoming, s.workflow.approvals),
-      };
+      const nextWorkflow: SpotWorkflow = (() => {
+        if (s.workflow.kind === "launch-campaign") {
+          const current = s.workflow.approvals;
+          let approvals = current;
+          // Pre-select sensible defaults so the user sees selected state
+          // immediately on entering a step (clearer than "0 selected").
+          if (upcoming === "personas" && current.personaIds.length === 0) {
+            // Import lazily to avoid a circular ref at module top-level.
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { LAUNCH_PERSONAS } = require("./workflow") as typeof import("./workflow");
+            const existing = LAUNCH_PERSONAS.filter(
+              (p: { origin: string }) => p.origin === "existing",
+            ).map((p: { id: string }) => p.id);
+            approvals = { ...current, personaIds: existing };
+          }
+          return { ...s.workflow, step: upcoming, approvals };
+        }
+        // Diagnostic flows — clear selectedIds when leaving a "picks"
+        // step so the next selectable step starts fresh.
+        return { ...s.workflow, step: upcoming, selectedIds: [] };
+      })();
 
       if (tc) {
         appended.push({
@@ -452,11 +569,15 @@ export const useSpotStore = create<PanelState>((set) => ({
     set((s) => (s.workflow ? { workflow: { ...s.workflow, step } } : {})),
 
   setWorkflowBudget: (b) =>
-    set((s) => (s.workflow ? { workflow: { ...s.workflow, budget: b } } : {})),
+    set((s) =>
+      s.workflow && s.workflow.kind === "launch-campaign"
+        ? { workflow: { ...s.workflow, budget: b } }
+        : {},
+    ),
 
   toggleWorkflowApproval: (group, id) =>
     set((s) => {
-      if (!s.workflow) return {};
+      if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
       const current = s.workflow.approvals[group];
       const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
       return {
@@ -467,8 +588,26 @@ export const useSpotStore = create<PanelState>((set) => ({
       };
     }),
 
+  toggleDiagnosticPick: (id) =>
+    set((s) => {
+      if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
+      const current = s.workflow.selectedIds;
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      return { workflow: { ...s.workflow, selectedIds: next } };
+    }),
+
+  focusProblem: (problemId) =>
+    set((s) => {
+      if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
+      return { workflow: { ...s.workflow, focusedProblemId: problemId } };
+    }),
+
   attachVoiceAgent: (agentId) =>
-    set((s) => (s.workflow ? { workflow: { ...s.workflow, attachedVoiceAgentId: agentId } } : {})),
+    set((s) =>
+      s.workflow && s.workflow.kind === "launch-campaign"
+        ? { workflow: { ...s.workflow, attachedVoiceAgentId: agentId } }
+        : {},
+    ),
 
   exitWorkflow: () => set({ workflow: null, canvasOpen: true, viewHomeOverride: false }),
 
