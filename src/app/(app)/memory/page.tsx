@@ -21,7 +21,7 @@
 
 import { useState } from "react";
 import {
-  BrainCircuit,
+  Brain,
   Package,
   Users,
   Image as ImageIcon,
@@ -58,7 +58,7 @@ export default function MemoryPage() {
       <div className="flex items-start justify-between mb-5">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-card bg-[#FAF8F2] border border-[#E8E3D5] flex items-center justify-center flex-shrink-0">
-            <BrainCircuit size={18} strokeWidth={1.5} className="text-text-secondary" />
+            <Brain size={18} strokeWidth={1.5} className="text-text-secondary" />
           </div>
           <div>
             <div className="text-meta text-text-secondary mb-0.5">Spot's brain</div>

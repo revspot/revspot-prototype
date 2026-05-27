@@ -18,7 +18,7 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  BrainCircuit,
+  Brain,
   Database,
   ScanLine,
   Send,
@@ -58,7 +58,7 @@ const navGroups: NavItem[][] = [
   [
     { name: "Dashboard", href: "/dashboard", icon: LayoutGrid, description: "Metrics, leads, voice perf" },
     { name: "Campaigns", href: "/campaigns", icon: Monitor, description: "Meta · Google · live spend" },
-    { name: "Memory", href: "/memory", icon: BrainCircuit, description: "Products, personas, creatives, performance & change history" },
+    { name: "Memory", href: "/memory", icon: Brain, description: "Products, personas, creatives, performance & change history" },
     { name: "Leads", href: "/enquiries", icon: FileText, description: "CRM inbox" },
   ],
   [{ name: "Outreach", href: "/outreach", icon: Send, description: "Voice + WhatsApp outbound" }],
