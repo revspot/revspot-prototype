@@ -41,10 +41,13 @@ import {
 import { getWorkspace } from "@/lib/workspace-data";
 import { projectsForWorkspace } from "@/lib/project-data";
 
+// Match Lucide's ForwardRefExoticComponent signature via `typeof LayoutGrid`
+// — using a narrower React.ComponentType<{size, strokeWidth}> rejects
+// Lucide icons at compile time on strict tsconfigs (Vercel-style).
 type NavItem = {
   name: string;
   href: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  icon: typeof LayoutGrid;
   description?: string;
   comingSoon?: boolean;
 };

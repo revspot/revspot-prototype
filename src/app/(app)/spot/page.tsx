@@ -459,7 +459,10 @@ function Composer({
   return (
     <div className="composer">
       <textarea
-        ref={inputRef}
+        // React 19's RefObject<T | null> doesn't satisfy textarea's
+        // LegacyRef<HTMLTextAreaElement>; cast bridges the gap without
+        // changing runtime behaviour.
+        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={2}

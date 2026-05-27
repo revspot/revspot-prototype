@@ -201,7 +201,10 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-const CREATIVE_KIND_ICON: Record<PersonaCreative["kind"], React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+// Lucide icons use ForwardRefExoticComponent<LucideProps> which doesn't
+// match a narrow React.ComponentType. `typeof ImageIcon` captures Lucide's
+// actual signature without coupling us to the LucideIcon export.
+const CREATIVE_KIND_ICON: Record<PersonaCreative["kind"], typeof ImageIcon> = {
   image: ImageIcon,
   video: Film,
   carousel: Layout,
