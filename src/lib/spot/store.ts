@@ -2,6 +2,16 @@
 
 import { create } from "zustand";
 import type { GuidedKind, GuidedPayload, SpotMessage, SpotScope } from "./types";
+import {
+  EMPTY_APPROVALS,
+  nextStep,
+  stepIntroMessage,
+  STEP_TOOL_CALL,
+  type LaunchWorkflow,
+  type WorkflowBudget,
+  type WorkflowStep,
+} from "./workflow";
+import { PRODUCTS } from "../products-data";
 
 type PanelState = {
   open: boolean;
@@ -22,8 +32,41 @@ type PanelState = {
   // Toast
   toast: string | null;
 
+  // Launch workflow — the split-screen agentic flow on /spot.
+  // null = no workflow active, single-column chat.
+  workflow: LaunchWorkflow | null;
+  // Whether the right-pane canvas is visible. Workflow state is
+  // preserved when this is false — the user just gets the chat wider
+  // so they can read uninterrupted, like collapsing Claude's preview.
+  canvasOpen: boolean;
+  // When a workflow is active but the user has navigated back to the
+  // Spot homepage (via the "Spot home" button), this is true. The
+  // workflow is preserved; we just render the home view. Setting back
+  // to false re-enters the split-screen.
+  viewHomeOverride: boolean;
+
   // Setters
   askSpot: (query: string, scope?: SpotScope) => void;
+  startLaunchFlow: (project: { id: string; name: string }) => void;
+  /** Start the workflow at the product-setup step (new product flow). */
+  startNewProductFlow: () => void;
+  /** Spot doesn't recognise the product — fake-research it in real-time. */
+  startDeepResearch: (productName: string) => void;
+  /** Advance the workflow to the next step + seed a Spot narration message. */
+  advanceWorkflow: (narration?: string) => void;
+  /** Jump to a specific step (used for "edit a previous step"). */
+  gotoStep: (step: WorkflowStep) => void;
+  setWorkflowBudget: (b: WorkflowBudget) => void;
+  toggleWorkflowApproval: (group: "personaIds" | "angleIds" | "formIds", id: string) => void;
+  exitWorkflow: () => void;
+  /** Collapse the right-pane canvas without losing workflow state. */
+  setCanvasOpen: (open: boolean) => void;
+  /** Convenience toggler used by the canvas open/close buttons. */
+  toggleCanvas: () => void;
+  /** Park the workflow and render the homepage (workflow stays alive). */
+  showHomeView: () => void;
+  /** Resume the active workflow (homepage banner / past-chats click). */
+  resumeWorkflow: () => void;
   setScope: (scope: SpotScope) => void;
   appendMessage: (m: SpotMessage) => void;
   setThread: (m: SpotMessage[] | ((prev: SpotMessage[]) => SpotMessage[])) => void;
@@ -51,6 +94,9 @@ export const useSpotStore = create<PanelState>((set) => ({
   paletteOpen: false,
   guided: null,
   toast: null,
+  workflow: null,
+  canvasOpen: true,
+  viewHomeOverride: false,
 
   askSpot: (query, scope) =>
     set((s) => ({
@@ -59,6 +105,347 @@ export const useSpotStore = create<PanelState>((set) => ({
       // bump ts even when the same query is repeated so subscribers re-fire
       pendingQuery: { q: query, ts: Date.now() },
     })),
+
+  // Kicks off the launch workflow for an *existing* product. Chat opens
+  // with a single conversational line + a "Memory Reader" tool-call. The
+  // right pane shows a shimmer skeleton. After a beat both reveal — chat
+  // gets a 1-line "memory looks solid" summary + the approval CTA; the
+  // canvas blooms into the full memory view. Mirrors the deep-research
+  // pattern but on existing memory.
+  startLaunchFlow: (project) => {
+    const product = PRODUCTS.find((p) => p.id === project.id);
+    const callId = `tc-${Date.now()}`;
+
+    set(() => ({
+      open: true,
+      maximized: false,
+      canvasOpen: true,
+      viewHomeOverride: false,
+      scope: { kind: "project", label: project.name, target: project.id },
+      pendingQuery: null,
+      workflow: {
+        kind: "launch-campaign",
+        step: "kickoff",
+        productId: project.id,
+        productName: project.name,
+        budget: null,
+        approvals: { ...EMPTY_APPROVALS },
+        startedAt: Date.now(),
+        researchedMemory: null,
+        kickoffReady: false,
+      },
+      thread: [
+        {
+          role: "spot",
+          parts: [
+            {
+              type: "text",
+              text: `Let me pull up what I know about **${project.name}**.`,
+            },
+            {
+              type: "tool-call",
+              id: callId,
+              agent: "memory.read",
+              detail: `loading product file · ${project.name}`,
+              status: "running",
+            },
+          ],
+        },
+      ],
+    }));
+
+    // After the loader, reveal the canvas + drop a short conversational
+    // line in chat. No findings dump — the user can read the right pane.
+    setTimeout(() => {
+      set((s) => {
+        if (!s.workflow) return {};
+        const nextWorkflow: LaunchWorkflow = { ...s.workflow, kickoffReady: true };
+        const updatedThread = s.thread.map((m) => {
+          if (m.role !== "spot") return m;
+          return {
+            ...m,
+            parts: m.parts.map((p) =>
+              p.type === "tool-call" && p.id === callId
+                ? { ...p, status: "done" as const }
+                : p,
+            ),
+          };
+        });
+        const summary: SpotMessage = {
+          role: "spot",
+          parts: [
+            {
+              type: "text",
+              text: product
+                ? `Got it. Memory's **${Math.round(product.readiness * 100)}% complete** — ${product.personas.length} personas linked, ${product.memory.length} entries on file. Pulled it up on the right.`
+                : `Pulled what I have onto the right.`,
+            },
+            {
+              type: "step-cta",
+              label: "Looks right — start with personas",
+              helper: "I'll bring up who you've been targeting.",
+              refineHint: "or tell me what's missing",
+            },
+          ],
+        };
+        return { workflow: nextWorkflow, thread: [...updatedThread, summary] };
+      });
+    }, 4500);
+  },
+
+  // Kicks off the new-product flow. Step 1 is product memory setup;
+  // every later step inherits the product the user just created.
+  startNewProductFlow: () =>
+    set(() => ({
+      open: true,
+      maximized: false,
+      canvasOpen: true,
+      viewHomeOverride: false,
+      scope: { kind: "workspace", label: "New product" },
+      pendingQuery: null,
+      workflow: {
+        kind: "launch-campaign",
+        step: "product-setup",
+        productId: null,
+        productName: "Untitled product",
+        budget: null,
+        approvals: { ...EMPTY_APPROVALS },
+        startedAt: Date.now(),
+        researchedMemory: null,
+        kickoffReady: true,
+      },
+      thread: [
+        {
+          role: "spot",
+          parts: [
+            { type: "headline", text: "Let's start from scratch.", verdict: "info" },
+            {
+              type: "text",
+              text: "Tell me about the product on the right — brand, USPs, things to avoid. I'll build the memory layer first; everything downstream uses it.",
+            },
+          ],
+        },
+      ],
+    })),
+
+  // The user mentioned a product we don't have on file. Instead of
+  // crashing on "no memory found", we kick off a deep-research arc —
+  // spawn the Research Agent, show progress on the canvas, then on a
+  // delay synthesise the memory and advance to kickoff. From the
+  // user's POV it feels like Spot just learned about the product.
+  startDeepResearch: (productName) => {
+    const callId = `tc-${Date.now()}`;
+    set(() => ({
+      open: true,
+      maximized: false,
+      canvasOpen: true,
+      viewHomeOverride: false,
+      scope: { kind: "workspace", label: productName },
+      pendingQuery: null,
+      workflow: {
+        kind: "launch-campaign",
+        step: "deep-research",
+        productId: null,
+        productName,
+        budget: null,
+        approvals: { ...EMPTY_APPROVALS },
+        startedAt: Date.now(),
+        researchedMemory: null,
+        kickoffReady: true,
+      },
+      thread: [
+        {
+          role: "spot",
+          parts: [
+            {
+              type: "headline",
+              text: `I haven't seen "${productName}" yet.`,
+              verdict: "info",
+            },
+            {
+              type: "text",
+              text: "Let me spin up the Deep Research Agent — I'll crawl the brand site, pull category signals from the open web, and check our audience graph, then write everything to product memory.",
+            },
+            {
+              type: "tool-call",
+              id: callId,
+              agent: "Deep Research Agent",
+              detail: "Crawling brand site · category signals · audience overlap.",
+              status: "running",
+            },
+          ],
+        },
+      ],
+    }));
+
+    // After a beat, finish the research, synthesise memory, advance to kickoff.
+    setTimeout(() => {
+      set((s) => {
+        if (!s.workflow) return {};
+        const researched: import("./workflow").ResearchedMemory = {
+          tagline: `${productName} — fresh research from Spot. Memory pre-filled; edit any field in chat.`,
+          usps: [
+            "Strongest category signal: live cohort + mentor-led delivery beats pure-recorded on retention.",
+            "Pricing band sits in the median tier — room to test premium / lite variants once we have data.",
+            "Closest competitor's positioning is rank-led; an outcomes-led counter-position should win on trust.",
+          ],
+          avoid: [
+            "Don't promise specific outcomes (ranks, jobs, admits) — likely flagged by legal.",
+            "Skip celebrity-endorsement framing unless explicitly cleared.",
+          ],
+          sources: [
+            "Brand site · /about, /curriculum, /pricing",
+            "Category research · top-of-funnel keyword landscape",
+            "Open web · category review sites, parent forums",
+            "Revspot audience graph · cross-product persona overlap",
+          ],
+        };
+        const nextWorkflow: LaunchWorkflow = {
+          ...s.workflow,
+          step: "kickoff",
+          researchedMemory: researched,
+        };
+        // Flip the tool-call to done + append the kickoff intro.
+        const updatedThread = s.thread.map((m) => {
+          if (m.role !== "spot") return m;
+          return {
+            ...m,
+            parts: m.parts.map((p) =>
+              p.type === "tool-call" && p.id === callId
+                ? { ...p, status: "done" as const }
+                : p,
+            ),
+          };
+        });
+        const kickoff: SpotMessage = {
+          role: "spot",
+          parts: [
+            {
+              type: "headline",
+              text: `${productName} · memory built.`,
+              verdict: "ok",
+            },
+            {
+              type: "text",
+              text: `I've drafted what I'd lead with and what to avoid. The right pane shows it — since this is brand-new with no past campaign data, I'll plan a **conservative experiment** at the next step.`,
+            },
+            {
+              type: "step-cta",
+              label: "Looks right — start with personas",
+              helper: "I'll dispatch the Persona Researcher next.",
+              refineHint: "or tell me what's missing",
+            },
+          ],
+        };
+        return { workflow: nextWorkflow, thread: [...updatedThread, kickoff] };
+      });
+    }, 2800);
+  },
+
+  advanceWorkflow: (narration) =>
+    set((s) => {
+      if (!s.workflow) return {};
+      const upcoming = nextStep(s.workflow.step);
+      const tc = STEP_TOOL_CALL[upcoming];
+      const callId = `tc-${Date.now()}`;
+      // Pre-select sensible defaults so the user sees selected state
+      // immediately on entering a step (clearer than "0 selected").
+      const preselectFor = (step: WorkflowStep, current: typeof s.workflow.approvals) => {
+        if (step === "personas" && current.personaIds.length === 0) {
+          // Import lazily to avoid a circular ref at module top-level.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { LAUNCH_PERSONAS } = require("./workflow") as typeof import("./workflow");
+          return { ...current, personaIds: LAUNCH_PERSONAS.map((p) => p.id) };
+        }
+        return current;
+      };
+
+      // First pass: append narration (if any) + the running tool-call.
+      // The step doesn't advance yet — the right pane stays on the
+      // current step until the agent "finishes".
+      const appended: SpotMessage[] = [];
+      if (narration) {
+        appended.push({ role: "spot", parts: [{ type: "text", text: narration }] });
+      }
+      if (tc) {
+        appended.push({
+          role: "spot",
+          parts: [
+            {
+              type: "tool-call",
+              id: callId,
+              agent: tc.agent,
+              detail: tc.detail,
+              status: "running",
+            },
+          ],
+        });
+        // After the fake delay, flip the tool-call to done, append the
+        // step intro, and advance workflow.step.
+        setTimeout(() => {
+          set((s2) => {
+            if (!s2.workflow) return {};
+            const nextWorkflow: LaunchWorkflow = {
+              ...s2.workflow,
+              step: upcoming,
+              approvals: preselectFor(upcoming, s2.workflow.approvals),
+            };
+            const intro = stepIntroMessage(upcoming, nextWorkflow);
+            const updatedThread = s2.thread.map((m) => {
+              if (m.role !== "spot") return m;
+              return {
+                ...m,
+                parts: m.parts.map((p) =>
+                  p.type === "tool-call" && p.id === callId
+                    ? { ...p, status: "done" as const }
+                    : p,
+                ),
+              };
+            });
+            const finalThread = intro ? [...updatedThread, intro] : updatedThread;
+            return { workflow: nextWorkflow, thread: finalThread };
+          });
+        }, tc.delayMs);
+        return { thread: [...s.thread, ...appended] };
+      }
+
+      // No tool call configured for this transition — advance synchronously.
+      const nextWorkflow: LaunchWorkflow = {
+        ...s.workflow,
+        step: upcoming,
+        approvals: preselectFor(upcoming, s.workflow.approvals),
+      };
+      const intro = stepIntroMessage(upcoming, nextWorkflow);
+      if (intro) appended.push(intro);
+      return { workflow: nextWorkflow, thread: [...s.thread, ...appended] };
+    }),
+
+  gotoStep: (step) =>
+    set((s) => (s.workflow ? { workflow: { ...s.workflow, step } } : {})),
+
+  setWorkflowBudget: (b) =>
+    set((s) => (s.workflow ? { workflow: { ...s.workflow, budget: b } } : {})),
+
+  toggleWorkflowApproval: (group, id) =>
+    set((s) => {
+      if (!s.workflow) return {};
+      const current = s.workflow.approvals[group];
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      return {
+        workflow: {
+          ...s.workflow,
+          approvals: { ...s.workflow.approvals, [group]: next },
+        },
+      };
+    }),
+
+  exitWorkflow: () => set({ workflow: null, canvasOpen: true, viewHomeOverride: false }),
+
+  setCanvasOpen: (open) => set({ canvasOpen: open }),
+  toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
+
+  showHomeView: () => set({ viewHomeOverride: true }),
+  resumeWorkflow: () => set({ viewHomeOverride: false, canvasOpen: true }),
 
   setScope: (scope) => set({ scope }),
   appendMessage: (m) => set((s) => ({ thread: [...s.thread, m] })),
@@ -74,7 +461,38 @@ export const useSpotStore = create<PanelState>((set) => ({
   openPalette: () => set({ paletteOpen: true }),
   closePalette: () => set({ paletteOpen: false }),
 
-  openGuided: (payload) => set({ guided: payload }),
+  // Legacy callers across the platform still call openGuided() expecting
+  // a modal. The modal is dead — we now redirect to /spot and seed a
+  // thread that walks the user through the same step inline. The
+  // SpotRedirector watches `open` and routes accordingly.
+  openGuided: (payload) =>
+    set(() => ({
+      open: true,
+      maximized: false,
+      pendingQuery: null,
+      thread: [
+        {
+          role: "spot",
+          parts: [
+            {
+              type: "headline",
+              text: `Starting: ${guidedKindLabel[payload.kind]}.`,
+              verdict: "info",
+            },
+            {
+              type: "text",
+              text: "I'll walk us through this here — no modals. Approve each step inline and I'll dispatch the right agent in the background.",
+            },
+            {
+              type: "handoff",
+              kind: payload.kind,
+              label: `Continue · ${guidedKindLabel[payload.kind]}`,
+              reason: "I'll handle the next step inline.",
+            },
+          ],
+        },
+      ],
+    })),
   closeGuided: () => set({ guided: null }),
 
   showToast: (text) => set({ toast: text }),

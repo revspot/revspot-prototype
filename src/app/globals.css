@@ -230,6 +230,44 @@
 .slideInRight { animation: slideInRight 240ms ease-out forwards; }
 .spot-pulse { animation: spotPulse 1.6s ease-in-out infinite; }
 
+/* ─── Trail-end "agent working" indicator ────────────────────────
+ *
+ * The Spot mark sits at the end of the chat trail. When work is in
+ * progress, the mark gently breathes (subtle scale + warm halo) and a
+ * row of three dots fades in sequence next to it. When idle, both
+ * stop — just the static mark remains. No spinning rings.
+ */
+@keyframes spotBreath {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(232, 201, 122, 0));
+  }
+  50% {
+    transform: scale(1.06);
+    filter: drop-shadow(0 0 4px rgba(232, 201, 122, 0.55));
+  }
+}
+.spot-breath { animation: spotBreath 1.6s ease-in-out infinite; }
+
+@keyframes spotDot {
+  0%, 60%, 100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-1.5px);
+  }
+}
+.spot-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--text-2);
+  animation: spotDot 1.4s ease-in-out infinite;
+  display: inline-block;
+}
+
 /* Deep-dive overlay — hide global app chrome while the deep-dive shell
    covers the viewport with its own header + full-width body. */
 body[data-deep-dive] aside,

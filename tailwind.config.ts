@@ -68,7 +68,7 @@ const config: Config = {
         metric: "12px",
       },
       spacing: {
-        sidebar: "240px",
+        sidebar: "60px",
       },
       maxWidth: {
         content: "1200px",

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, AlertTriangle, Check, Info, TrendingUp, ChevronRight } from "lucide-react";
+import { AlertTriangle, Check, Info, ChevronRight, ArrowRight, Cog } from "lucide-react";
 import { SpotMark } from "./spot-mark";
 import { RichText } from "./rich-text";
 import type { SpotFinding, SpotKpi, SpotMessage, SpotPart, Verdict, GuidedKind } from "@/lib/spot/types";
@@ -24,15 +24,15 @@ function VerdictBadge({ verdict }: { verdict: Verdict }) {
 function HeadlinePart({ text, verdict }: { text: string; verdict?: Verdict }) {
   return (
     <div
-      className="flex items-start gap-2.5 mb-2.5"
+      className="flex items-start gap-2 mb-2"
       style={{
-        padding: "10px 14px",
+        padding: "7px 10px",
         background: "var(--spot-tint)",
         border: "1px solid var(--spot-stroke)",
-        borderRadius: 10,
+        borderRadius: 8,
       }}
     >
-      <div className="flex-1 text-[14px] leading-[1.55] text-text-primary">
+      <div className="flex-1 text-[12.5px] leading-[1.5] text-text-primary">
         <RichText text={text} />
       </div>
       {verdict && <VerdictBadge verdict={verdict} />}
@@ -99,15 +99,63 @@ function KpisPart({ items }: { items: SpotKpi[] }) {
   );
 }
 
+// Per-kind "next step" reply Spot appends inline when a handoff card
+// is clicked. No modals: everything happens inside the chat thread, the
+// platform pages continue their own work in the background.
+const NEXT_STEP: Record<GuidedKind, SpotMessage> = {
+  "new-persona": {
+    role: "spot",
+    parts: [
+      { type: "headline", text: "Starting persona research.", verdict: "info" },
+      {
+        type: "findings",
+        items: [
+          { tone: "neutral", title: "Pulling existing personas linked to this product", body: "I'll look at every persona already approved against this product's memory and surface the ones that historically work." },
+          { tone: "neutral", title: "Sweeping comparable products", body: "Cross-checking Banerghatta + Yelahanka audience overlap to recommend net-new personas worth testing." },
+          { tone: "neutral", title: "Drafting persona briefs", body: "For each candidate I'll write identity, pain, desire, and the channels where they perform — you approve or refine." },
+        ],
+      },
+      { type: "text", text: "Reply with **approve** to lock the existing personas, or ask me to research a specific cohort first." },
+    ],
+  },
+  "new-angle": {
+    role: "spot",
+    parts: [
+      { type: "headline", text: "Drafting angles.", verdict: "info" },
+      { type: "text", text: "I'll write 2–3 angle drafts (hook + CTA) per approved persona. Each shows up as a card on the persona's page — accept inline, no modal." },
+    ],
+  },
+  "launch-creative": {
+    role: "spot",
+    parts: [
+      { type: "headline", text: "Briefing the Creative Agent.", verdict: "info" },
+      { type: "text", text: "The Creative Agent is generating statics + video shells against the approved angles. You'll see them appear on **Creatives** as they're ready — keep working here while I run." },
+    ],
+  },
+  "new-campaign": {
+    role: "spot",
+    parts: [
+      { type: "headline", text: "Structuring the campaign.", verdict: "info" },
+      { type: "text", text: "I'm assembling campaign → ad sets → ads on Meta and Google. Revspot stays read-only on those entities; you'll get a link out when it's time to launch." },
+    ],
+  },
+  "new-adset": {
+    role: "spot",
+    parts: [
+      { type: "headline", text: "Building the ad set.", verdict: "info" },
+      { type: "text", text: "Picking audiences from the linked personas and pacing budget across them." },
+    ],
+  },
+};
+
 function HandoffPart({ kind, label, reason }: { kind: GuidedKind; label: string; reason: string }) {
-  const openGuided = useSpotStore((s) => s.openGuided);
-  const closePanel = useSpotStore((s) => s.closePanel);
+  const setThread = useSpotStore((s) => s.setThread);
   return (
     <button
       type="button"
       onClick={() => {
-        openGuided({ kind });
-        closePanel();
+        const next = NEXT_STEP[kind];
+        if (next) setThread((prev) => [...prev, next]);
       }}
       className="card-base hover-row text-left w-full p-3 flex items-center gap-3 mb-2.5"
     >
@@ -119,13 +167,73 @@ function HandoffPart({ kind, label, reason }: { kind: GuidedKind; label: string;
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-[12px] uppercase tracking-wider text-text-tertiary font-semibold mb-0.5">
-          Guided flow
+          Next step
         </div>
         <div className="text-[13.5px] font-semibold">{label}</div>
         <div className="text-[11.5px] text-text-secondary mt-0.5">{reason}</div>
       </div>
       <ChevronRight size={14} className="text-text-tertiary flex-shrink-0" />
     </button>
+  );
+}
+
+function StepCtaPart({ label, helper, refineHint }: { label: string; helper?: string; refineHint?: string }) {
+  const advanceWorkflow = useSpotStore((s) => s.advanceWorkflow);
+  return (
+    <div
+      className="mb-2 rounded-[8px] border p-2.5"
+      style={{
+        background: "linear-gradient(135deg, #FAF8F2 0%, #FFFCEC 100%)",
+        borderColor: "#E8C97A",
+      }}
+    >
+      {helper && (
+        <div className="text-[11px] text-text-secondary leading-snug mb-1.5">{helper}</div>
+      )}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => advanceWorkflow()}
+          className="inline-flex items-center gap-1 h-6 px-2.5 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[11px] font-medium"
+        >
+          {label}
+          <ArrowRight size={10} strokeWidth={2} />
+        </button>
+        {refineHint && (
+          <span className="text-[10.5px] text-text-tertiary">{refineHint}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolCallPart({ agent, detail, status }: { agent: string; detail?: string; status: "running" | "done" }) {
+  const running = status === "running";
+  // Inline thinking line — no card, no border. Single row that reads
+  // like a Claude "tool call" trace. While running, the agent name is
+  // shown alone; once done it greys out so the page doesn't shout.
+  return (
+    <div className="mb-1.5 flex items-baseline gap-1.5 text-[11.5px] leading-[1.5]">
+      {running ? (
+        <Cog
+          size={10}
+          strokeWidth={1.8}
+          className="text-text-secondary relative top-[1.5px] animate-spin"
+          style={{ animationDuration: "2s" }}
+        />
+      ) : (
+        <Check size={10} strokeWidth={2.2} className="text-[#15803D] relative top-[1.5px]" />
+      )}
+      <span className={running ? "text-text-secondary" : "text-text-tertiary"}>
+        <span className="font-medium">{agent}</span>
+        {detail && (
+          <>
+            <span className="text-text-tertiary"> · </span>
+            <span>{detail}</span>
+          </>
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -139,9 +247,13 @@ function PartRenderer({ part }: { part: SpotPart }) {
       return <KpisPart items={part.items} />;
     case "handoff":
       return <HandoffPart kind={part.kind} label={part.label} reason={part.reason} />;
+    case "step-cta":
+      return <StepCtaPart label={part.label} helper={part.helper} refineHint={part.refineHint} />;
+    case "tool-call":
+      return <ToolCallPart agent={part.agent} detail={part.detail} status={part.status} />;
     case "text":
       return (
-        <div className="text-[13px] leading-[1.55] mb-2.5">
+        <div className="text-[12.5px] leading-[1.55] mb-1.5">
           <RichText text={part.text} />
         </div>
       );
@@ -157,15 +269,15 @@ export function MessageBubble({
 }) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end mb-3.5">
+      <div className="flex justify-end mb-2.5">
         <div
           style={{
             background: "var(--chat-user-bg)",
             color: "var(--chat-user-fg)",
-            padding: "9px 13px",
-            borderRadius: 12,
+            padding: "7px 11px",
+            borderRadius: 10,
             borderBottomRightRadius: 4,
-            fontSize: 13.5,
+            fontSize: 12.5,
             maxWidth: "85%",
             lineHeight: 1.5,
           }}
@@ -175,40 +287,34 @@ export function MessageBubble({
       </div>
     );
   }
+  // Spot messages render avatar-less, Claude-style. The Spot mark
+  // lives in the chat header (with a live indicator when an agent is
+  // actually working) so the chat thread isn't a column of repeated icons.
   return (
-    <div className={`${animate ? "fadeUp" : ""} flex gap-2.5 mb-3.5`}>
-      <SpotMark size={20} style={{ flexShrink: 0, marginTop: 2 }} />
-      <div className="flex-1 min-w-0">
-        {message.parts.map((p, i) => (
-          <PartRenderer key={i} part={p} />
-        ))}
-      </div>
+    <div className={`${animate ? "fadeUp" : ""} mb-2.5`}>
+      {message.parts.map((p, i) => (
+        <PartRenderer key={i} part={p} />
+      ))}
     </div>
   );
 }
 
 export function TypingDots() {
   return (
-    <div className="flex gap-2.5 mb-3.5">
-      <SpotMark size={20} style={{ flexShrink: 0, marginTop: 2 }} />
-      <div
-        className="inline-flex items-center gap-1 px-3 py-2 rounded-[10px]"
-        style={{ background: "var(--spot-tint)", border: "1px solid var(--spot-stroke)" }}
-      >
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="spot-pulse"
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: "50%",
-              background: "var(--text-2)",
-              animationDelay: `${i * 0.18}s`,
-            }}
-          />
-        ))}
-      </div>
+    <div className="mb-2.5 flex items-center gap-1">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="spot-pulse"
+          style={{
+            width: 4,
+            height: 4,
+            borderRadius: "50%",
+            background: "var(--text-2)",
+            animationDelay: `${i * 0.18}s`,
+          }}
+        />
+      ))}
     </div>
   );
 }

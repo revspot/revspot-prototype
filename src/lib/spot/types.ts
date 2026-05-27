@@ -18,7 +18,22 @@ export type SpotPart =
   | { type: "headline"; text: string; verdict?: Verdict }
   | { type: "findings"; items: SpotFinding[] }
   | { type: "kpis"; items: SpotKpi[] }
-  | { type: "handoff"; kind: GuidedKind; label: string; reason: string };
+  | { type: "handoff"; kind: GuidedKind; label: string; reason: string }
+  // Inline workflow CTA — owns the "Approve & continue" action so the
+  // chat (not the right-pane workspace) is where decisions get made.
+  // Spent rendered the right-pane canvas as a place to *see* the work
+  // and the chat as the place to *act on it*, like Claude's flows.
+  | { type: "step-cta"; label: string; helper?: string; refineHint?: string }
+  // Tool / agent call narration — renders a compact status row that
+  // says "Spawning Persona Researcher…" with a spinner. Status flips
+  // to "done" with a check once the workflow advances.
+  | {
+      type: "tool-call";
+      id: string;
+      agent: string;
+      detail?: string;
+      status: "running" | "done";
+    };
 
 export type SpotFinding = {
   tone?: "concern" | "positive" | "neutral";
