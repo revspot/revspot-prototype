@@ -4,7 +4,7 @@
 // approval action lives in the left chat (via the step-cta part). This
 // pane just shows what Spot is working on.
 
-import { PanelRightClose, X, Users, Package, ChartPie, Sparkles, Megaphone, Layout as LayoutIcon, PartyPopper, CheckCircle2, Check, Wifi, WifiOff, Cog, ChevronRight, Pencil, Search, ShieldAlert, TrendingUp, ExternalLink, Image as ImageIcon, Mic, MessageSquare, Phone, ArrowRight, Upload, FileText, Film as FilmIcon, Layers, Paperclip } from "lucide-react";
+import { PanelRightClose, X, Users, Package, ChartPie, Sparkles, Megaphone, Layout as LayoutIcon, PartyPopper, CheckCircle2, Check, Wifi, WifiOff, Cog, ChevronRight, Pencil, Search, ShieldAlert, TrendingUp, ExternalLink, Image as ImageIcon, Mic, MessageSquare, Phone, ArrowRight, Upload, FileText, Film as FilmIcon, Layers, Paperclip, Brain } from "lucide-react";
 import { motion } from "framer-motion";
 import type { Variants } from "framer-motion";
 import { useEffect, useState } from "react";
@@ -342,6 +342,97 @@ const BUILDING_MEMORY_MESSAGES = [
   "Indexing memory for downstream agents…",
 ];
 
+/**
+ * Brain + shimmer loader · used while memory is being written. The
+ * brain icon (with a soft pulsing aura behind it) reads as "thinking
+ * + writing"; the cycling status reflects which memory block is
+ * being committed. Skeleton bars below mimic the memory layout
+ * filling in.
+ */
+function BuildingMemoryLoader() {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setIdx((i) => (i + 1) % BUILDING_MEMORY_MESSAGES.length);
+    }, 1800);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="px-5 py-8 max-w-[640px] mx-auto">
+      {/* Brain icon with soft pulsing aura */}
+      <div className="flex flex-col items-center text-center mb-6">
+        <div className="relative w-16 h-16 mb-4 flex items-center justify-center">
+          <div
+            className="absolute inset-0 rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle, rgba(232, 224, 200, 0.55) 0%, transparent 65%)",
+              animation: "spotAura 2.2s ease-in-out infinite",
+            }}
+          />
+          <div className="relative w-12 h-12 rounded-full bg-white border border-[#E8E3D5] flex items-center justify-center shadow-sm">
+            <Brain
+              size={22}
+              strokeWidth={1.4}
+              className="text-text-secondary"
+              style={{ animation: "spotCorePulse 2.4s ease-in-out infinite" }}
+            />
+          </div>
+        </div>
+        <div className="text-section-header text-text-primary">Building memory…</div>
+        <div
+          key={idx}
+          className="text-[12.5px] text-text-tertiary mt-1.5 max-w-[420px] leading-relaxed"
+        >
+          {BUILDING_MEMORY_MESSAGES[idx]}
+        </div>
+      </div>
+
+      {/* Shimmer skeleton — mirrors the kickoff memory layout so the
+          transition into real content feels smooth, not jarring. */}
+      <div className="space-y-3">
+        {/* Tagline card */}
+        <div className="bg-white border border-border rounded-card p-4 space-y-2.5">
+          <div className="skeleton h-3 w-24 rounded" />
+          <div className="skeleton h-5 w-3/4 rounded" />
+          <div className="skeleton h-3 w-2/3 rounded" />
+        </div>
+        {/* Brief grid */}
+        <div className="bg-white border border-border rounded-card p-4 space-y-2">
+          <div className="skeleton h-3 w-20 rounded mb-2" />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="skeleton h-3 w-full rounded" />
+            ))}
+          </div>
+        </div>
+        {/* Pricing + offers */}
+        <div className="grid grid-cols-2 gap-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="bg-white border border-border rounded-card p-4 space-y-2">
+              <div className="skeleton h-3 w-20 rounded" />
+              <div className="skeleton h-3 w-full rounded" />
+              <div className="skeleton h-3 w-5/6 rounded" />
+              <div className="skeleton h-3 w-2/3 rounded" />
+            </div>
+          ))}
+        </div>
+        {/* USPs + Avoid */}
+        <div className="grid grid-cols-2 gap-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="bg-white border border-border rounded-card p-4 space-y-2">
+              <div className="skeleton h-3 w-24 rounded" />
+              <div className="skeleton h-3 w-full rounded" />
+              <div className="skeleton h-3 w-5/6 rounded" />
+              <div className="skeleton h-3 w-2/3 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeepResearchStep({ workflow }: { workflow: LaunchWorkflow }) {
   return (
     <div className="h-full flex items-center justify-center px-5 py-8">
@@ -609,22 +700,14 @@ function KickoffStep({ workflow }: { workflow: LaunchWorkflow }) {
   const researched = workflow.researchedMemory;
 
   // Loading state. Two flavours:
-  //   · After deep research → full-screen "Building memory" with cycling
-  //     status, telegraphing what Spot is writing.
+  //   · After deep research → BRAIN icon + shimmer skeleton with cycling
+  //     status. Memory is a thinking/writing act — a brain glyph reads
+  //     more accurately than the Spot orb (which signals "Spot itself
+  //     is doing something" rather than "memory is being written").
   //   · Loading existing product memory → quick skeleton shimmer.
   if (!workflow.kickoffReady) {
-    // Heuristic: if there's no productId, we came from deep-research →
-    // building memory. Otherwise we're loading from the library.
     if (!workflow.productId) {
-      return (
-        <div className="h-full flex items-center justify-center px-5 py-8">
-          <SpotFullscreen
-            title="Building memory…"
-            messages={BUILDING_MEMORY_MESSAGES}
-            size={72}
-          />
-        </div>
-      );
+      return <BuildingMemoryLoader />;
     }
     return <KickoffSkeleton productName={workflow.productName} />;
   }

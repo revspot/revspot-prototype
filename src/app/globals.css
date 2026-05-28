@@ -329,14 +329,18 @@
   align-items: center;
   justify-content: center;
 }
-.spot-orbit .ring {
+/* `.sl-ring` deliberately namespaced (not `.ring`) to avoid Tailwind's
+ * `ring` utility — that utility applies `box-shadow: 0 0 0 3px blue`,
+ * which was rendering our gold dashed frames as blue squares.
+ */
+.spot-orbit .sl-ring {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
 }
-.spot-orbit .ring.outer { animation: spotOrbitRot 3.6s linear infinite; }
-.spot-orbit .ring.inner { animation: spotOrbitRev 5.2s linear infinite; }
+.spot-orbit .sl-ring-outer { animation: spotOrbitRot 3.6s linear infinite; }
+.spot-orbit .sl-ring-inner { animation: spotOrbitRev 5.2s linear infinite; }
 .spot-orbit .core {
   width: var(--size, 56px);
   height: var(--size, 56px);
@@ -365,14 +369,14 @@
   animation: spotAura 2.2s ease-in-out infinite;
 }
 .spot-breathe.round .aura { border-radius: 50%; }
-.spot-breathe .ring-pulse {
+.spot-breathe .sl-ring-pulse {
   position: absolute;
   inset: calc(var(--size, 56px) * 0.18);
   border-radius: calc(var(--size, 56px) * 0.32);
   border: 1px solid rgba(201, 168, 106, 0.55);
   animation: spotAura 2.2s ease-in-out 0.4s infinite;
 }
-.spot-breathe.round .ring-pulse { border-radius: 50%; }
+.spot-breathe.round .sl-ring-pulse { border-radius: 50%; }
 .spot-breathe .core {
   width: var(--size, 56px);
   height: var(--size, 56px);

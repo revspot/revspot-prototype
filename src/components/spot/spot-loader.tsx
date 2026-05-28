@@ -98,10 +98,10 @@ function SpotOrbit({ shape }: { shape: SpotLoaderShape }) {
   if (shape === "round") {
     return (
       <div className="spot-orbit">
-        <svg viewBox="0 0 100 100" className="ring outer" aria-hidden>
+        <svg viewBox="0 0 100 100" className="sl-ring sl-ring-outer" aria-hidden>
           <circle cx="50" cy="50" r="48" style={OUTER_RING} />
         </svg>
-        <svg viewBox="0 0 100 100" className="ring inner" aria-hidden>
+        <svg viewBox="0 0 100 100" className="sl-ring sl-ring-inner" aria-hidden>
           <circle cx="50" cy="50" r="42" style={INNER_RING} />
         </svg>
         <div className="spot-loader-core core round" />
@@ -110,10 +110,10 @@ function SpotOrbit({ shape }: { shape: SpotLoaderShape }) {
   }
   return (
     <div className="spot-orbit">
-      <svg viewBox="0 0 100 100" className="ring outer" aria-hidden>
+      <svg viewBox="0 0 100 100" className="sl-ring sl-ring-outer" aria-hidden>
         <rect x="2" y="2" width="96" height="96" rx="14" style={OUTER_RING} />
       </svg>
-      <svg viewBox="0 0 100 100" className="ring inner" aria-hidden>
+      <svg viewBox="0 0 100 100" className="sl-ring sl-ring-inner" aria-hidden>
         <rect x="9" y="9" width="82" height="82" rx="11" style={INNER_RING} />
       </svg>
       <div className="spot-loader-core core" />
@@ -125,7 +125,7 @@ function SpotBreathe({ shape }: { shape: SpotLoaderShape }) {
   return (
     <div className={`spot-breathe ${shape === "round" ? "round" : ""}`}>
       <div className="aura" />
-      <div className="ring-pulse" />
+      <div className="sl-ring-pulse" />
       <div className={`spot-loader-core core ${shape === "round" ? "round" : ""}`} />
     </div>
   );
