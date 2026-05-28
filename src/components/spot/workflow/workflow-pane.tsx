@@ -488,16 +488,108 @@ const MEMORY_BUILD_AGENTS: { id: string; label: string; duration: number }[] = [
 ];
 
 /**
- * Memory-building loader · the hero loading state for the deep
- * research phase. Mirrors the plan loader's three-part composition:
- * header with progress bar, skeleton previewing the memory layout,
- * and an agent strip that ticks through the work in real time.
+ * Scripted findings · what Spot "discovers" over the 8s loader.
+ * Each one appears at a specific timestamp, the way a real agent
+ * would emit progress events. Renders as a streaming feed below
+ * the live counters.
+ */
+const MEMORY_FINDINGS: {
+  time: number;
+  category: "crawl" | "web" | "docs" | "graph" | "synth" | "write";
+  icon: string;
+  label: string;
+}[] = [
+  { time: 350, category: "crawl", icon: "🌐", label: "GET /about · 200 · 1.4kb" },
+  { time: 700, category: "crawl", icon: "🌐", label: "GET /curriculum · 200 · 8.2kb" },
+  { time: 1050, category: "crawl", icon: "🌐", label: "GET /pricing · 200 · 2.1kb" },
+  { time: 1300, category: "crawl", icon: "🔗", label: "Extracted 47 product entities" },
+  { time: 1600, category: "web", icon: "🔍", label: "Indexed 12 category review sites" },
+  { time: 1950, category: "web", icon: "🔍", label: "Indexed 8 parent forum threads" },
+  { time: 2250, category: "web", icon: "🏷️", label: "Found 3 competitor pricing tiers" },
+  { time: 2600, category: "docs", icon: "📄", label: "Parsed uploaded brochure · 14 pages" },
+  { time: 2900, category: "docs", icon: "📄", label: "Extracted 22 positioning phrases" },
+  { time: 3200, category: "graph", icon: "🧠", label: "Matched 5 cross-product personas" },
+  { time: 3650, category: "graph", icon: "🧠", label: "Cohort overlap with 2 existing products" },
+  { time: 4050, category: "graph", icon: "📈", label: "Found ₹420 CPL benchmark · category median" },
+  { time: 4450, category: "synth", icon: "✨", label: "Drafted product tagline" },
+  { time: 4850, category: "synth", icon: "✨", label: "Locked 4 USPs · ranked by category lift" },
+  { time: 5300, category: "synth", icon: "🛡️", label: "Flagged 3 do-not-mention items" },
+  { time: 5700, category: "synth", icon: "👥", label: "Drafted Persona 1 · Working professional" },
+  { time: 6050, category: "synth", icon: "👥", label: "Drafted Persona 2 · College student" },
+  { time: 6400, category: "synth", icon: "👥", label: "Drafted Persona 3 · Parent buying for child" },
+  { time: 6750, category: "synth", icon: "💰", label: "Proposed 3 pricing tiers · median band" },
+  { time: 7100, category: "write", icon: "✓", label: "Committed brief → memory.md" },
+  { time: 7400, category: "write", icon: "✓", label: "Committed personas → memory.md" },
+  { time: 7700, category: "write", icon: "✓", label: "Memory index rebuilt · ready" },
+];
+
+/** Live counters · numbers tick up as findings accumulate. Each is
+ *  bound to a finding category (or sum of categories). */
+function countersFromFindings(visible: typeof MEMORY_FINDINGS) {
+  return {
+    pages: visible.filter((f) => f.category === "crawl" && f.label.startsWith("GET")).length,
+    entities: visible.find((f) => f.label.includes("entities"))
+      ? 47
+      : 0,
+    signals:
+      visible.filter((f) => f.category === "web").length +
+      visible.filter((f) => f.category === "graph").length,
+    personas: visible.filter((f) => f.label.startsWith("Drafted Persona")).length,
+  };
+}
+
+/** Animate a number tick from prev → next over a short duration. */
+function useTickingNumber(target: number, ms = 400) {
+  const [n, setN] = useState(target);
+  useEffect(() => {
+    if (n === target) return;
+    const start = n;
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      const t = Math.min(1, (Date.now() - startedAt) / ms);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const value = Math.round(start + (target - start) * eased);
+      setN(value);
+      if (t >= 1) clearInterval(id);
+    }, 40);
+    return () => clearInterval(id);
+  }, [target, ms, n]);
+  return n;
+}
+
+/**
+ * Memory-building loader · the "wow" loading state for the deep
+ * research phase. Designed to feel ALIVE — multiple coordinated
+ * motions, live data streaming, counters ticking up, content
+ * actually being discovered in real time.
+ *
+ * Composition (top → bottom):
+ *
+ *   1. Hero block · gradient-meshed card with the orbit Spot loader
+ *      floating on a soft radial glow, the page title, and a
+ *      smooth gradient progress bar with a glowing tip
+ *
+ *   2. Live counters · four big numbers that tick up as findings
+ *      accumulate (pages crawled, entities extracted, signals
+ *      found, personas drafted). Each in its own card with an
+ *      icon and a faint animated pulse on increment
+ *
+ *   3. Live findings stream · scrolling terminal-style feed of
+ *      concrete discoveries with timestamps, fading newest at
+ *      top, oldest at bottom. Each line slides in
+ *
+ *   4. Agent strip · the 6 sub-agents from before, more compact,
+ *      still ticking queued → running → done so the user can see
+ *      the agent topology
  */
 function MemoryBuildingLoader({ productName }: { productName: string }) {
   const TOTAL_MS = MEMORY_BUILD_AGENTS.reduce((s, a) => s + a.duration, 0);
   const [doneCount, setDoneCount] = useState(0);
   const [progress, setProgress] = useState(2);
+  const [visibleFindings, setVisibleFindings] = useState<typeof MEMORY_FINDINGS>([]);
+  const findingsRef = useRef<HTMLDivElement>(null);
 
+  // Sub-agents · tick queued → running → done.
   useEffect(() => {
     setDoneCount(0);
     let cumulative = 0;
@@ -509,135 +601,255 @@ function MemoryBuildingLoader({ productName }: { productName: string }) {
     return () => timers.forEach(clearTimeout);
   }, []);
 
+  // Progress bar fills smoothly.
   useEffect(() => {
     const start = Date.now();
     const id = setInterval(() => {
       const elapsed = Date.now() - start;
-      const pct = Math.min(98, (elapsed / TOTAL_MS) * 100);
+      const pct = Math.min(99, (elapsed / TOTAL_MS) * 100);
       setProgress(pct);
-      if (pct >= 98) clearInterval(id);
-    }, 80);
+      if (pct >= 99) clearInterval(id);
+    }, 60);
     return () => clearInterval(id);
   }, [TOTAL_MS]);
 
+  // Live findings stream · schedule each at its timestamp.
+  useEffect(() => {
+    setVisibleFindings([]);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    MEMORY_FINDINGS.forEach((f) => {
+      timers.push(
+        setTimeout(() => {
+          setVisibleFindings((prev) => [...prev, f]);
+        }, f.time),
+      );
+    });
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // Auto-scroll findings to the newest entry.
+  useEffect(() => {
+    if (findingsRef.current) {
+      findingsRef.current.scrollTop = findingsRef.current.scrollHeight;
+    }
+  }, [visibleFindings.length]);
+
+  const counters = countersFromFindings(visibleFindings);
+  const pages = useTickingNumber(counters.pages);
+  const entities = useTickingNumber(counters.entities);
+  const signals = useTickingNumber(counters.signals);
+  const personas = useTickingNumber(counters.personas);
+
   return (
-    <div className="px-6 py-6 max-w-[760px] mx-auto">
-      {/* Header — running indicator + title + progress */}
-      <div className="mb-7">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider font-semibold text-[#15803D]">
-            <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#15803D]">
-              <span className="absolute inset-0 rounded-full bg-[#15803D] opacity-50 animate-ping" />
-            </span>
-            Spot is researching
+    <div className="px-6 py-6 max-w-[820px] mx-auto">
+      {/* ── HERO BLOCK ───────────────────────────────────────── */}
+      <div
+        className="relative overflow-hidden rounded-card mb-5"
+        style={{
+          background:
+            "linear-gradient(135deg, #FBF8F0 0%, #F5EFE0 50%, #F0E6CD 100%)",
+          border: "1px solid #E8E3D5",
+          boxShadow: "0 12px 36px -12px rgba(201, 168, 106, 0.25)",
+        }}
+      >
+        {/* Soft radial glow underlay */}
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 60% 50% at 50% 30%, rgba(201, 168, 106, 0.22) 0%, transparent 70%)",
+          }}
+        />
+        {/* Subtle moving gradient sheen */}
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none opacity-50"
+          style={{
+            background:
+              "linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.4) 50%, transparent 70%)",
+            backgroundSize: "200% 100%",
+            animation: "shimmerSweep 3.6s ease-in-out infinite",
+          }}
+        />
+
+        <div className="relative px-7 py-7">
+          <div className="flex items-start gap-5">
+            {/* Big orbit loader · the hero glyph */}
+            <div className="relative flex-shrink-0">
+              <div
+                aria-hidden
+                className="absolute inset-0 rounded-full"
+                style={{
+                  background:
+                    "radial-gradient(circle, rgba(201, 168, 106, 0.35) 0%, transparent 65%)",
+                  filter: "blur(8px)",
+                  transform: "scale(1.4)",
+                }}
+              />
+              <SpotLoader mode="orbit" size={56} className="!gap-0 relative" />
+            </div>
+
+            <div className="flex-1 min-w-0 pt-1">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#15803D]">
+                  <span className="absolute inset-0 rounded-full bg-[#15803D] opacity-60 animate-ping" />
+                </span>
+                <span className="text-[10.5px] uppercase tracking-wider font-semibold text-[#15803D]">
+                  Deep Research Agent · live
+                </span>
+              </div>
+              <h1 className="text-[22px] font-semibold text-text-primary tracking-tight leading-[1.15]">
+                Building memory for{" "}
+                <span
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #8C6D33 0%, #C9A86A 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                  }}
+                >
+                  {productName}
+                </span>
+              </h1>
+              <p className="text-[12.5px] text-text-secondary mt-1.5 leading-relaxed">
+                One agent end-to-end — crawling, reading, synthesizing, then
+                writing everything to product memory.
+              </p>
+
+              {/* Progress bar with glowing tip */}
+              <div className="mt-4">
+                <div className="relative h-1.5 bg-white/60 rounded-full overflow-hidden">
+                  <div
+                    className="h-full transition-all duration-300 ease-out relative"
+                    style={{
+                      width: `${progress}%`,
+                      background:
+                        "linear-gradient(90deg, #C9A86A 0%, #E0C083 60%, #15803D 100%)",
+                    }}
+                  >
+                    {/* Glowing leading tip */}
+                    <span
+                      aria-hidden
+                      className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full"
+                      style={{
+                        background: "#15803D",
+                        boxShadow:
+                          "0 0 12px 2px rgba(34, 197, 94, 0.6), 0 0 4px rgba(255,255,255,0.8)",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-[10.5px] text-text-secondary tabular font-medium">
+                    {Math.round(progress)}%
+                  </span>
+                  <span className="text-[10.5px] text-text-tertiary tabular">
+                    {doneCount} of {MEMORY_BUILD_AGENTS.length} sub-agents complete
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── LIVE COUNTERS ───────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-2.5 mb-5">
+        <CounterCard
+          icon="🌐"
+          label="Pages crawled"
+          value={pages}
+          pulse={counters.pages > 0}
+        />
+        <CounterCard
+          icon="🔗"
+          label="Entities found"
+          value={entities}
+          pulse={counters.entities > 0}
+        />
+        <CounterCard
+          icon="📊"
+          label="Signals indexed"
+          value={signals}
+          pulse={counters.signals > 0}
+        />
+        <CounterCard
+          icon="👥"
+          label="Personas drafted"
+          value={personas}
+          pulse={counters.personas > 0}
+        />
+      </div>
+
+      {/* ── LIVE FINDINGS STREAM ───────────────────────────── */}
+      <div className="bg-white border border-border rounded-card overflow-hidden mb-5">
+        <div className="px-4 py-2.5 border-b border-border-subtle bg-surface-page flex items-center gap-2">
+          <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#C9A86A]">
+            <span className="absolute inset-0 rounded-full bg-[#C9A86A] opacity-50 animate-ping" />
+          </span>
+          <span className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-semibold">
+            Live findings
+          </span>
+          <span className="flex-1" />
+          <span className="text-[10.5px] text-text-tertiary tabular">
+            {visibleFindings.length} events
           </span>
         </div>
-        <h1 className="text-[20px] font-semibold text-text-primary tracking-tight leading-tight">
-          Building memory for{" "}
-          <span className="text-text-primary">{productName}</span>
-        </h1>
-        <div className="text-[12px] text-text-secondary mt-1.5 leading-relaxed">
-          One agent end-to-end — crawling the URL, reading your files, matching
-          audience signals, then writing the brief to product memory.
-        </div>
-
-        <div className="mt-4">
-          <div className="h-1 bg-surface-page rounded-full overflow-hidden">
-            <div
-              className="h-full transition-all duration-300 ease-out"
-              style={{
-                width: `${progress}%`,
-                background:
-                  "linear-gradient(90deg, #C9A86A 0%, #E0C083 60%, #15803D 100%)",
-              }}
-            />
-          </div>
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[10.5px] text-text-tertiary tabular">
-              {Math.round(progress)}%
-            </span>
-            <span className="text-[10.5px] text-text-tertiary tabular">
-              {doneCount} of {MEMORY_BUILD_AGENTS.length} sub-tasks complete
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Skeleton · previews the destination memory layout */}
-      <div className="space-y-5 mb-7">
-        {/* H1 + properties + tagline */}
-        <div>
-          <div className="skeleton h-8 w-3/5 rounded mb-2.5" />
-          <div className="flex gap-1.5 mb-3">
-            <div className="skeleton h-4 w-20 rounded-full" />
-            <div className="skeleton h-4 w-14 rounded-full" />
-            <div className="skeleton h-4 w-24 rounded-full" />
-          </div>
-          <div
-            className="rounded-card border-l-4 px-4 py-3 space-y-1.5"
-            style={{ borderLeftColor: "#E8E3D5", background: "#FAF8F2" }}
-          >
-            <div className="skeleton h-3 w-full rounded" />
-            <div className="skeleton h-3 w-11/12 rounded" />
-            <div className="skeleton h-3 w-2/3 rounded" />
-          </div>
-        </div>
-
-        {/* Product brief · 2-col card grid */}
-        <div>
-          <div className="flex items-center gap-2 pb-1.5 border-b border-border-subtle mb-2.5">
-            <span className="w-1 h-1 rounded-full bg-[#C9A86A]" />
-            <div className="skeleton h-4 w-28 rounded" />
-          </div>
-          <div className="grid grid-cols-2 gap-2.5">
-            {[0, 1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-white border border-border-subtle rounded-card px-3.5 py-3 space-y-1.5"
-              >
-                <div className="skeleton h-3 w-20 rounded" />
-                <div className="skeleton h-3 w-full rounded" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Personas · pill-ish stacked rows */}
-        <div>
-          <div className="flex items-center gap-2 pb-1.5 border-b border-border-subtle mb-2.5">
-            <span className="w-1 h-1 rounded-full bg-[#C9A86A]" />
-            <div className="skeleton h-4 w-20 rounded" />
-          </div>
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex gap-2.5 mb-2 last:mb-0">
-              <span className="w-1 h-1 rounded-full bg-border mt-2 flex-shrink-0" />
-              <div className="skeleton h-3 w-3/4 rounded" />
+        <div
+          ref={findingsRef}
+          className="px-4 py-2.5 h-48 overflow-y-auto scroll"
+          style={{ scrollBehavior: "smooth" }}
+        >
+          {visibleFindings.length === 0 ? (
+            <div className="text-[11.5px] text-text-tertiary italic py-2">
+              Listening for events…
             </div>
-          ))}
-        </div>
-
-        {/* Pricing tiles */}
-        <div>
-          <div className="flex items-center gap-2 pb-1.5 border-b border-border-subtle mb-2.5">
-            <span className="w-1 h-1 rounded-full bg-[#C9A86A]" />
-            <div className="skeleton h-4 w-16 rounded" />
-          </div>
-          <div className="grid grid-cols-3 gap-2.5">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="bg-white border border-border-subtle rounded-card px-3.5 py-3 space-y-1.5"
-              >
-                <div className="skeleton h-3 w-3/4 rounded" />
-                <div className="skeleton h-5 w-1/2 rounded" />
-                <div className="skeleton h-3 w-2/3 rounded" />
-              </div>
-            ))}
-          </div>
+          ) : (
+            <ul className="space-y-1">
+              {visibleFindings.map((f, i) => {
+                const ts = (f.time / 1000).toFixed(2);
+                return (
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 text-[11.5px] leading-relaxed"
+                    style={{
+                      animation:
+                        i === visibleFindings.length - 1
+                          ? "findingSlide 320ms ease-out"
+                          : undefined,
+                    }}
+                  >
+                    <span
+                      className="font-mono text-[10px] text-text-tertiary tabular flex-shrink-0"
+                      style={{ minWidth: "42px" }}
+                    >
+                      +{ts}s
+                    </span>
+                    <span className="flex-shrink-0 text-[12px]" aria-hidden>
+                      {f.icon}
+                    </span>
+                    <span className="text-text-secondary flex-1 truncate">
+                      {f.label}
+                    </span>
+                    <span
+                      className={`text-[9.5px] uppercase tracking-wider font-semibold flex-shrink-0 ${
+                        f.category === "write"
+                          ? "text-[#15803D]"
+                          : "text-text-tertiary"
+                      }`}
+                    >
+                      {f.category}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       </div>
 
-      {/* Agent strip · concrete sub-tasks ticking through */}
+      {/* ── COMPACT AGENT STRIP ────────────────────────────── */}
       <div className="bg-white border border-border rounded-card overflow-hidden">
         <div className="px-4 py-2.5 border-b border-border-subtle bg-surface-page flex items-center gap-2">
           <Cog
@@ -647,7 +859,7 @@ function MemoryBuildingLoader({ productName }: { productName: string }) {
             style={{ animationDuration: "2.4s" }}
           />
           <span className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-semibold">
-            Deep Research Agent · at work
+            Sub-agent topology
           </span>
         </div>
         <ul className="divide-y divide-border-subtle">
@@ -658,7 +870,7 @@ function MemoryBuildingLoader({ productName }: { productName: string }) {
             return (
               <li
                 key={a.id}
-                className={`flex items-center gap-2.5 px-4 py-2 transition-colors ${
+                className={`flex items-center gap-2.5 px-4 py-1.5 transition-colors ${
                   done
                     ? "bg-[#F0FDF4]/40"
                     : running
@@ -694,7 +906,7 @@ function MemoryBuildingLoader({ productName }: { productName: string }) {
                   {a.id}
                 </span>
                 <span
-                  className={`text-[12.5px] flex-1 truncate ${
+                  className={`text-[12px] flex-1 truncate ${
                     queued
                       ? "text-text-tertiary"
                       : done
@@ -705,12 +917,12 @@ function MemoryBuildingLoader({ productName }: { productName: string }) {
                   {a.label}
                 </span>
                 {running && (
-                  <span className="text-[10.5px] uppercase tracking-wider text-[#8C6D33] font-semibold flex-shrink-0">
+                  <span className="text-[10px] uppercase tracking-wider text-[#8C6D33] font-semibold flex-shrink-0">
                     running…
                   </span>
                 )}
                 {done && (
-                  <span className="text-[10.5px] uppercase tracking-wider text-[#15803D] font-semibold flex-shrink-0">
+                  <span className="text-[10px] uppercase tracking-wider text-[#15803D] font-semibold flex-shrink-0">
                     done
                   </span>
                 )}
@@ -718,6 +930,51 @@ function MemoryBuildingLoader({ productName }: { productName: string }) {
             );
           })}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+/** Big-number counter card · large tabular value, small label,
+ *  emoji icon. Pulses gently when its value is non-zero so the
+ *  user notices the increment. */
+function CounterCard({
+  icon,
+  label,
+  value,
+  pulse,
+}: {
+  icon: string;
+  label: string;
+  value: number;
+  pulse: boolean;
+}) {
+  return (
+    <div
+      className={`bg-white border border-border rounded-card px-3.5 py-3 relative overflow-hidden transition-transform ${
+        pulse ? "" : ""
+      }`}
+    >
+      {pulse && value > 0 && (
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 60% at 100% 0%, rgba(201, 168, 106, 0.08) 0%, transparent 70%)",
+          }}
+        />
+      )}
+      <div className="relative flex items-baseline gap-1.5">
+        <span className="text-[15px]" aria-hidden>
+          {icon}
+        </span>
+        <span className="text-[22px] font-semibold text-text-primary tabular leading-none">
+          {value}
+        </span>
+      </div>
+      <div className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold mt-1.5">
+        {label}
       </div>
     </div>
   );
@@ -1313,6 +1570,80 @@ function DashboardFileView({ workflow }: { workflow: SpotWorkflow }) {
   );
 }
 
+/* ─── Dummy assets for the new-product flow ──────────────────
+ * Used as placeholders until the user drops real generated
+ * creatives into /public/assets/creatives/. Each card renders the
+ * persona/angle name on a gradient background; if an image exists
+ * at the matching `src` path it'll be loaded instead.
+ * ────────────────────────────────────────────────────────────── */
+
+type DummyCreative = {
+  id: string;
+  title: string;
+  angle: string;
+  personaName: string;
+  channel: "Meta" | "Google" | "YouTube";
+  format: "1:1" | "4:5" | "9:16" | "16:9";
+  sizes: ("1:1" | "4:5" | "9:16" | "16:9")[];
+  kind: "image" | "video" | "carousel";
+  state: "ready" | "draft";
+  hue: number;
+  /** Optional · drop a file at this path inside /public to override
+   *  the gradient placeholder. */
+  src?: string;
+};
+
+const DUMMY_CREATIVES: DummyCreative[] = [
+  { id: "c01", title: "Speak confidently in 12 weeks", angle: "Outcome-led", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 28, src: "/assets/creatives/c01.png" },
+  { id: "c02", title: "Live cohort · Native trainers", angle: "Authority", personaName: "Working professional", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 42, src: "/assets/creatives/c02.png" },
+  { id: "c03", title: "Real conversation drills", angle: "Method", personaName: "Working professional", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 56, src: "/assets/creatives/c03.png" },
+  { id: "c04", title: "Crack any interview · 6 weeks", angle: "Outcome-led", personaName: "College student", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 200, src: "/assets/creatives/c04.png" },
+  { id: "c05", title: "From hesitation to fluent", angle: "Transformation", personaName: "College student", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 215, src: "/assets/creatives/c05.png" },
+  { id: "c06", title: "Mock interviews · weekly", angle: "Method", personaName: "College student", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 188, src: "/assets/creatives/c06.png" },
+  { id: "c07", title: "Help your child speak with confidence", angle: "Emotional", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 340, src: "/assets/creatives/c07.png" },
+  { id: "c08", title: "Trusted by 12,000+ parents", angle: "Social proof", personaName: "Parent · buying for child", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 320, src: "/assets/creatives/c08.png" },
+  { id: "c09", title: "School-confidence in 8 weeks", angle: "Outcome-led", personaName: "Parent · buying for child", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 300, src: "/assets/creatives/c09.png" },
+  { id: "c10", title: "Try one free class", angle: "Trial-led", personaName: "Working professional", channel: "YouTube", format: "16:9", sizes: ["16:9"], kind: "video", state: "ready", hue: 12, src: "/assets/creatives/c10.png" },
+  { id: "c11", title: "Speak in 8 weeks · ₹0 risk", angle: "Risk-reversal", personaName: "College student", channel: "YouTube", format: "16:9", sizes: ["16:9"], kind: "video", state: "ready", hue: 230, src: "/assets/creatives/c11.png" },
+  { id: "c12", title: "Built for working pros", angle: "Positioning", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1"], kind: "carousel", state: "draft", hue: 70, src: "/assets/creatives/c12.png" },
+];
+
+const DUMMY_SEARCH_ADS: {
+  id: string;
+  campaign: "Brand" | "Category" | "Competitor";
+  primaryHeadline: string;
+  primaryDescription: string;
+  keywords: string;
+  status: "live" | "draft";
+}[] = [
+  { id: "sa01", campaign: "Brand", primaryHeadline: "{Product} · Speak Confidently · Live Cohort", primaryDescription: "Native trainers, real conversation drills, mock interviews. Free trial class.", keywords: "guyju spoken english, guyju's spoken english", status: "live" },
+  { id: "sa02", campaign: "Category", primaryHeadline: "Best Spoken English Course Online", primaryDescription: "Live cohort with native trainers. Outcomes-led syllabus. 12-week program.", keywords: "best spoken english course, spoken english classes online", status: "live" },
+  { id: "sa03", campaign: "Competitor", primaryHeadline: "Smarter Than {Competitor}? You Decide", primaryDescription: "Live cohorts vs. recorded videos. Side-by-side comparison.", keywords: "{competitor} alternative, {competitor} review", status: "draft" },
+];
+
+const DUMMY_LANDING_PAGES: {
+  id: string;
+  title: string;
+  personaName: string;
+  sections: number;
+  status: "live" | "draft";
+}[] = [
+  { id: "lp01", title: "Working professional · landing", personaName: "Working professional", sections: 9, status: "live" },
+  { id: "lp02", title: "College student · landing", personaName: "College student", sections: 8, status: "live" },
+  { id: "lp03", title: "Parent · landing", personaName: "Parent · buying for child", sections: 9, status: "live" },
+];
+
+const DUMMY_FORMS: {
+  id: string;
+  title: string;
+  kind: "lead-form" | "click-to-whatsapp" | "phone-form";
+  personaName: string;
+  fields: number;
+}[] = [
+  { id: "fm01", title: "Free trial signup", kind: "lead-form", personaName: "Working professional", fields: 4 },
+  { id: "fm02", title: "WhatsApp me about classes", kind: "click-to-whatsapp", personaName: "Parent · buying for child", fields: 2 },
+];
+
 function AssetsFileView({
   workflow,
   buildingOverlay,
@@ -1321,34 +1652,402 @@ function AssetsFileView({
   buildingOverlay: boolean;
 }) {
   const files = getProductFiles(workflow);
-  if (!files) {
-    return (
-      <EmptyCanvas
-        icon={ImageIcon}
-        title="No assets yet"
-        body="Once the plan is approved, Spot will generate creatives, search ads, landing pages, and forms — all of them land in this folder."
-      />
-    );
-  }
-  const { creatives, searchAds, landingPages, forms } = files.assets;
+
+  // Source the data — existing products use the real memory file,
+  // new products fall through to the dummy data so the assets tab
+  // is never empty.
+  const creatives = files?.assets.creatives
+    ? files.assets.creatives.map((c) => ({
+        id: c.id,
+        title: c.label,
+        angle: "Pre-built",
+        personaName: c.personaName,
+        channel: "Meta" as const,
+        format: c.format,
+        sizes: c.sizes,
+        kind: c.kind,
+        state: c.state === "live" ? ("ready" as const) : ("draft" as const),
+        hue: c.hue,
+        src: undefined as string | undefined,
+      }))
+    : DUMMY_CREATIVES;
+  const searchAds = files?.assets.searchAds
+    ? files.assets.searchAds.map((s) => ({
+        id: s.id,
+        campaign: s.campaign,
+        primaryHeadline: s.primaryHeadline,
+        primaryDescription: s.primaryDescription,
+        keywords: s.keywords,
+        status: s.status,
+      }))
+    : DUMMY_SEARCH_ADS;
+  const landingPages = files?.assets.landingPages
+    ? files.assets.landingPages.map((p) => ({
+        id: p.id,
+        title: p.title,
+        personaName: p.personaName,
+        sections: p.sections,
+        status: p.status,
+      }))
+    : DUMMY_LANDING_PAGES;
+  const forms = files?.assets.forms
+    ? files.assets.forms.map((f) => ({
+        id: f.id,
+        title: f.title,
+        kind: f.kind,
+        personaName: f.personaName,
+        fields: f.fields,
+      }))
+    : DUMMY_FORMS;
+
+  const productSlug = files?.productId ?? "new-product";
+
   return (
     <div className="relative">
       <div className="px-6 py-5">
-        <h1 className="text-[22px] font-semibold text-text-primary tracking-tight mt-0 mb-1">
-          Assets
-        </h1>
-        <p className="text-[12px] text-text-secondary mb-4">
-          {creatives.length} creatives · {searchAds.length} search ads · {landingPages.length} landing
-          pages · {forms.length} forms
-        </p>
-        <a
-          href="/memory"
-          className="inline-flex items-center gap-1 text-[11.5px] text-text-tertiary hover:text-text-primary"
-        >
-          See full asset library in Memory → Assets
-        </a>
+        {/* Header */}
+        <div className="mb-5">
+          <div className="text-[11px] text-text-tertiary mb-0.5">assets /</div>
+          <h1 className="text-[24px] font-semibold text-text-primary tracking-tight">
+            {workflow.kind === "campaign-dive"
+              ? workflow.productName
+              : (workflow as LaunchWorkflow).productName || "New product"}
+          </h1>
+          <div className="text-[12px] text-text-secondary mt-1">
+            <span className="font-medium text-text-primary">{creatives.length}</span> creatives ·{" "}
+            <span className="font-medium text-text-primary">{searchAds.length}</span> search ads ·{" "}
+            <span className="font-medium text-text-primary">{landingPages.length}</span> landing pages ·{" "}
+            <span className="font-medium text-text-primary">{forms.length}</span> forms
+          </div>
+          {!files && (
+            <div className="text-[11px] text-text-tertiary mt-2 leading-relaxed">
+              Placeholders below — drop real files into{" "}
+              <code className="text-[10.5px] font-mono bg-surface-page border border-border-subtle px-1 rounded">
+                /public/assets/creatives/
+              </code>{" "}
+              to replace.
+            </div>
+          )}
+        </div>
+
+        {/* Creatives grid */}
+        <SectionHeading title="Creatives" count={creatives.length} />
+        <div className="grid grid-cols-3 gap-3 mb-7">
+          {creatives.map((c) => (
+            <CreativeCard key={c.id} creative={c} productSlug={productSlug} />
+          ))}
+        </div>
+
+        {/* Search ads */}
+        <SectionHeading title="Search ads" count={searchAds.length} />
+        <div className="space-y-2.5 mb-7">
+          {searchAds.map((s) => (
+            <SearchAdRow key={s.id} ad={s} />
+          ))}
+        </div>
+
+        {/* Landing pages */}
+        <SectionHeading title="Landing pages" count={landingPages.length} />
+        <div className="grid grid-cols-3 gap-3 mb-7">
+          {landingPages.map((p) => (
+            <LandingPageCard key={p.id} page={p} />
+          ))}
+        </div>
+
+        {/* Forms */}
+        <SectionHeading title="Forms" count={forms.length} />
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          {forms.map((f) => (
+            <FormCard key={f.id} form={f} />
+          ))}
+        </div>
       </div>
       {buildingOverlay && <BuildingOverlay label="Spot is generating creatives…" />}
+    </div>
+  );
+}
+
+function SectionHeading({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="flex items-baseline gap-2 mb-3 pb-1.5 border-b border-border-subtle">
+      <span className="w-1 h-1 rounded-full bg-[#C9A86A]" />
+      <span className="text-[14px] font-semibold text-text-primary">{title}</span>
+      <span className="text-[11px] text-text-tertiary">{count}</span>
+    </div>
+  );
+}
+
+/** Creative card · placeholder gradient overlaid with the angle name
+ *  and a size badge in the corner. If an actual image lives at
+ *  `creative.src`, it loads on top (object-cover) — drop a file at
+ *  /public/assets/creatives/{id}.png to replace any placeholder. */
+function CreativeCard({
+  creative,
+  productSlug,
+}: {
+  creative: DummyCreative;
+  productSlug: string;
+}) {
+  // Aspect ratios for the thumbnail wrapper.
+  const ratioStyle = (() => {
+    switch (creative.format) {
+      case "1:1":
+        return { paddingTop: "100%" };
+      case "4:5":
+        return { paddingTop: "125%" };
+      case "9:16":
+        return { paddingTop: "177.77%" };
+      case "16:9":
+        return { paddingTop: "56.25%" };
+    }
+  })();
+
+  const gradientBg = `linear-gradient(135deg, hsl(${creative.hue}, 70%, 92%) 0%, hsl(${creative.hue}, 60%, 78%) 60%, hsl(${(creative.hue + 30) % 360}, 65%, 70%) 100%)`;
+
+  return (
+    <div className="group bg-white border border-border rounded-card overflow-hidden hover:border-border-hover transition-colors">
+      <div className="relative w-full" style={{ background: gradientBg }}>
+        <div style={ratioStyle} aria-hidden />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+          {/* Optional real image · falls through to gradient if file
+              doesn't exist (broken img stays transparent over the
+              gradient background). */}
+          {creative.src && (
+            <img
+              src={creative.src}
+              alt={creative.title}
+              className="absolute inset-0 w-full h-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          )}
+          {/* Overlay text — sits on the gradient when no real image,
+              or fades on hover when image is present. */}
+          <div className="relative z-10 px-2">
+            <div className="text-[10.5px] uppercase tracking-wider font-semibold text-white/85 mb-1.5 drop-shadow-sm">
+              {creative.angle}
+            </div>
+            <div className="text-[13px] font-semibold text-white leading-snug drop-shadow-sm">
+              {creative.title}
+            </div>
+          </div>
+        </div>
+        {/* Size + kind badges */}
+        <div className="absolute top-2 left-2 flex items-center gap-1">
+          <span className="inline-flex items-center h-5 px-1.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-[10px] font-mono tabular">
+            {creative.format}
+          </span>
+          {creative.kind === "video" && (
+            <span className="inline-flex items-center h-5 px-1.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-[10px] uppercase tracking-wider">
+              Video
+            </span>
+          )}
+          {creative.kind === "carousel" && (
+            <span className="inline-flex items-center h-5 px-1.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-[10px] uppercase tracking-wider">
+              Carousel
+            </span>
+          )}
+        </div>
+        {/* Status pill bottom-right */}
+        <div className="absolute bottom-2 right-2">
+          <span
+            className={`inline-flex items-center h-5 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider font-semibold ${
+              creative.state === "ready"
+                ? "bg-[#15803D] text-white"
+                : "bg-white text-[#8C6D33] border border-[#E8E3D5]"
+            }`}
+          >
+            {creative.state}
+          </span>
+        </div>
+      </div>
+      {/* Card footer · persona + channel + size variants */}
+      <div className="px-3 py-2.5 border-t border-border-subtle">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-[11px] font-medium text-text-primary truncate flex-1">
+            {creative.personaName}
+          </span>
+          <span className="text-[10px] text-text-tertiary tabular flex-shrink-0">
+            {creative.channel}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          {creative.sizes.map((sz) => (
+            <span
+              key={sz}
+              className={`inline-flex items-center h-4 px-1.5 rounded text-[9.5px] font-mono tabular ${
+                sz === creative.format
+                  ? "bg-text-primary text-[#FAFAF8]"
+                  : "bg-surface-page text-text-tertiary"
+              }`}
+            >
+              {sz}
+            </span>
+          ))}
+        </div>
+        <div className="text-[9.5px] text-text-tertiary mt-1.5 font-mono truncate">
+          {productSlug}/{creative.id}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Search ad row · mimics a Google search result so the user can
+ *  scan the headline/description at a glance. */
+function SearchAdRow({
+  ad,
+}: {
+  ad: {
+    id: string;
+    campaign: "Brand" | "Category" | "Competitor";
+    primaryHeadline: string;
+    primaryDescription: string;
+    keywords: string;
+    status: "live" | "draft";
+  };
+}) {
+  return (
+    <div className="bg-white border border-border rounded-card p-3.5">
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="inline-flex items-center h-4 px-1.5 rounded bg-[#FAF8F2] border border-[#E8E3D5] text-[9.5px] uppercase tracking-wider font-semibold text-[#8C6D33]">
+          {ad.campaign}
+        </span>
+        <span
+          className={`inline-flex items-center h-4 px-1.5 rounded text-[9.5px] uppercase tracking-wider font-semibold ${
+            ad.status === "live"
+              ? "bg-[#F0FDF4] border border-[#BBF7D0] text-[#15803D]"
+              : "bg-surface-page border border-border-subtle text-text-tertiary"
+          }`}
+        >
+          {ad.status}
+        </span>
+        <span className="flex-1" />
+        <span className="text-[9.5px] font-mono text-text-tertiary truncate max-w-[40%]">
+          {ad.keywords}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-1.5 mb-1">
+        <span className="text-[10.5px] uppercase tracking-wider font-semibold text-text-tertiary">
+          Ad
+        </span>
+        <span className="text-[10.5px] text-text-tertiary truncate">
+          guyju.com/spoken-english
+        </span>
+      </div>
+      <div className="text-[14.5px] text-[#1A0DAB] font-medium leading-snug hover:underline cursor-pointer">
+        {ad.primaryHeadline}
+      </div>
+      <div className="text-[12.5px] text-text-secondary leading-relaxed mt-1">
+        {ad.primaryDescription}
+      </div>
+    </div>
+  );
+}
+
+/** Landing page mock thumbnail · stacked grayscale rectangles that
+ *  represent sections. Reads as a tiny page preview. */
+function LandingPageCard({
+  page,
+}: {
+  page: {
+    id: string;
+    title: string;
+    personaName: string;
+    sections: number;
+    status: "live" | "draft";
+  };
+}) {
+  return (
+    <div className="bg-white border border-border rounded-card overflow-hidden hover:border-border-hover transition-colors">
+      <div
+        className="relative h-32 px-3 py-3 flex flex-col gap-1.5"
+        style={{
+          background:
+            "linear-gradient(180deg, #FBF8F0 0%, #F5EFE0 50%, #EBE2C9 100%)",
+        }}
+      >
+        <div className="h-2 w-3/4 rounded bg-white/80" />
+        <div className="h-3 w-5/6 rounded bg-white/80" />
+        <div className="h-6 w-full rounded bg-text-primary/80" />
+        <div className="grid grid-cols-3 gap-1 flex-1">
+          <div className="rounded bg-white/70" />
+          <div className="rounded bg-white/70" />
+          <div className="rounded bg-white/70" />
+        </div>
+        <span
+          className={`absolute top-2 right-2 inline-flex items-center h-4 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider font-semibold ${
+            page.status === "live"
+              ? "bg-[#15803D] text-white"
+              : "bg-white text-[#8C6D33] border border-[#E8E3D5]"
+          }`}
+        >
+          {page.status}
+        </span>
+      </div>
+      <div className="px-3 py-2.5 border-t border-border-subtle">
+        <div className="text-[12.5px] font-medium text-text-primary truncate">
+          {page.title}
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-[11px] text-text-secondary truncate flex-1">
+            {page.personaName}
+          </span>
+          <span className="text-[10px] text-text-tertiary tabular">
+            {page.sections} sections
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Form card · phone-frame preview with stacked field skeletons. */
+function FormCard({
+  form,
+}: {
+  form: {
+    id: string;
+    title: string;
+    kind: "lead-form" | "click-to-whatsapp" | "phone-form";
+    personaName: string;
+    fields: number;
+  };
+}) {
+  return (
+    <div className="bg-white border border-border rounded-card overflow-hidden hover:border-border-hover transition-colors">
+      <div
+        className="px-4 py-4 flex items-start gap-3"
+        style={{ background: "linear-gradient(180deg, #FFFFFF 0%, #FAF8F2 100%)" }}
+      >
+        {/* Phone frame */}
+        <div className="w-16 flex-shrink-0">
+          <div className="bg-white border border-border-subtle rounded-md overflow-hidden p-1.5 space-y-1">
+            <div className="h-1.5 w-full rounded-sm bg-surface-page" />
+            <div className="h-2.5 w-full rounded-sm bg-surface-page" />
+            <div className="h-2.5 w-full rounded-sm bg-surface-page" />
+            <div className="h-2.5 w-full rounded-sm bg-surface-page" />
+            <div className="h-3 w-full rounded-sm bg-text-primary/80" />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[12.5px] font-medium text-text-primary leading-snug">
+            {form.title}
+          </div>
+          <div className="text-[11px] text-text-secondary mt-0.5 truncate">
+            {form.personaName}
+          </div>
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            <span className="inline-flex items-center h-4 px-1.5 rounded-full bg-[#FAF8F2] border border-[#E8E3D5] text-[9.5px] uppercase tracking-wider font-semibold text-[#8C6D33]">
+              {form.kind.replace("-", " ")}
+            </span>
+            <span className="text-[10px] text-text-tertiary tabular">
+              {form.fields} fields
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
