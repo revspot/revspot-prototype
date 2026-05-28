@@ -162,126 +162,340 @@ function AnalyzeStep({ workflow }: { workflow: DiagnosticWorkflow }) {
   }
   const findings = analysisFor(workflow.kind);
 
+  // Group signals by category for visual hierarchy — winners stand
+  // apart from issues, neutral context goes at the bottom.
+  const winners = findings.signals.filter((s) => s.tag === "winner");
+  const issues = findings.signals.filter((s) => s.tag === "decay" || s.tag === "chronic");
+  const context = findings.signals.filter((s) => s.tag === "neutral");
+
+  const analyzedCount = findings.signals.length;
+  const issueCount = issues.length;
+  const winnerCount = winners.length;
+
   return (
     <motion.div
-      className="px-5 py-5"
+      className="px-5 py-6 max-w-[820px] mx-auto"
       initial="hidden"
       animate="show"
       variants={canvasStagger}
     >
-      <motion.div variants={canvasReveal}>
-        <StepHeader
-          title="What I'm seeing"
-          blurb="Analysis of recent performance, audience signals, and product memory before we set goals. Right pane shows the breakdown · the takeaways inform the next step."
-        />
-      </motion.div>
+      {/* Hero — the takeaway lands first and big. */}
+      <motion.div variants={canvasReveal} className="mb-5">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-[#FAF8F2] border border-[#E8E3D5]">
+            <span className="inline-flex w-1.5 h-1.5 rounded-full bg-[#15803D]" />
+            <span className="text-[10.5px] uppercase tracking-wider text-text-secondary font-semibold">
+              Analysis complete
+            </span>
+          </span>
+          <span className="text-[11px] text-text-tertiary">
+            Reading last 30 days · {workflow.productName}
+          </span>
+        </div>
 
-      {/* TL;DR */}
-      <motion.div
-        variants={canvasReveal}
-        className="bg-[#FAF8F2] border border-[#E8E3D5] rounded-card p-4 mb-3"
-      >
-        <div className="flex items-start gap-2.5">
-          <SpotMark size={18} />
-          <div className="flex-1 min-w-0">
-            <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary mb-1">
-              Takeaway
+        <div className="bg-gradient-to-br from-[#FAF8F2] to-[#F5F2E8] border border-[#E8E3D5] rounded-card p-5 relative overflow-hidden">
+          {/* Decorative Spot mark in corner */}
+          <div className="absolute -top-3 -right-3 opacity-[0.06]">
+            <SpotMark size={80} />
+          </div>
+
+          <div className="relative flex items-start gap-3">
+            <div className="w-9 h-9 rounded-full bg-white border border-[#E8E3D5] flex items-center justify-center flex-shrink-0 shadow-sm">
+              <SpotMark size={20} />
             </div>
-            <div className="text-[13.5px] text-text-primary leading-relaxed">
-              {findings.summary}
-            </div>
-            {findings.biggestProblem && (
-              <div className="mt-2.5 pt-2.5 border-t border-[#E8E3D5] flex items-start gap-2 text-[12px]">
-                <Target size={11} strokeWidth={1.7} className="text-text-secondary flex-shrink-0 mt-0.5" />
-                <span className="text-text-secondary">
-                  <span className="text-text-primary font-medium">Biggest problem:</span>{" "}
-                  {findings.biggestProblem}
-                </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary mb-1.5 font-semibold">
+                Here's what I'm seeing
               </div>
-            )}
+              <p className="text-[15px] text-text-primary leading-relaxed font-medium">
+                {findings.summary}
+              </p>
+              {findings.biggestProblem && (
+                <div className="mt-3.5 pt-3.5 border-t border-[#E8E3D5] flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-white border border-[#E8E3D5] flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Target size={10} strokeWidth={2} className="text-text-secondary" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary mb-0.5 font-semibold">
+                      Biggest single problem
+                    </div>
+                    <div className="text-[13px] text-text-primary leading-relaxed">
+                      {findings.biggestProblem}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </motion.div>
 
-      {/* Per-campaign signals */}
-      <motion.div variants={canvasReveal} className="mb-3">
-        <div className="label-section mb-2">By campaign · what I found</div>
-        <div className="space-y-2">
-          {findings.signals.map((sig, i) => (
-            <SignalCard key={i} signal={sig} />
-          ))}
-        </div>
+      {/* Numbers strip — quick read on what was analyzed */}
+      <motion.div variants={canvasReveal} className="grid grid-cols-4 gap-2.5 mb-6">
+        <SummaryStat label="Analyzed" value={analyzedCount} sub="campaigns + signals" />
+        <SummaryStat
+          label="Winning"
+          value={winnerCount}
+          sub={winnerCount > 0 ? "with headroom" : "none"}
+          accent={winnerCount > 0 ? "ok" : undefined}
+        />
+        <SummaryStat
+          label="Issues"
+          value={issueCount}
+          sub={
+            findings.hasDecay && findings.hasChronic
+              ? "decay + chronic"
+              : findings.hasDecay
+                ? "recent decay"
+                : findings.hasChronic
+                  ? "chronic only"
+                  : "none flagged"
+          }
+          accent={issueCount > 0 ? "err" : undefined}
+        />
+        <SummaryStat
+          label="Memory"
+          value={findings.memoryRefs.length}
+          sub="entries read"
+        />
       </motion.div>
 
-      {/* Memory references */}
-      <motion.div
-        variants={canvasReveal}
-        className="bg-white border border-border rounded-card p-3.5"
-      >
-        <div className="flex items-center gap-1.5 mb-2">
-          <Eye size={12} strokeWidth={1.7} className="text-text-secondary" />
-          <div className="label-section">What I read · product memory</div>
+      {/* Winners section */}
+      {winners.length > 0 && (
+        <motion.div variants={canvasReveal} className="mb-5">
+          <SectionHeader
+            icon={TrendingUp}
+            tone="good"
+            title={`Winners · ${winners.length}`}
+            blurb="Working well. Where the headroom lives."
+          />
+          <div className="space-y-2.5">
+            {winners.map((sig, i) => (
+              <BeautifulSignalCard key={i} signal={sig} rank={i + 1} />
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Issues section */}
+      {issues.length > 0 && (
+        <motion.div variants={canvasReveal} className="mb-5">
+          <SectionHeader
+            icon={AlertTriangle}
+            tone="bad"
+            title={`Problems · ${issues.length}`}
+            blurb={
+              findings.hasDecay && findings.hasChronic
+                ? "Recent decay AND chronic underperformers — different fixes for each."
+                : findings.hasDecay
+                  ? "Recent decay — something changed and broke it."
+                  : "Chronic — never hit target since launch."
+            }
+          />
+          <div className="space-y-2.5">
+            {issues.map((sig, i) => (
+              <BeautifulSignalCard key={i} signal={sig} rank={i + 1} />
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Neutral context */}
+      {context.length > 0 && (
+        <motion.div variants={canvasReveal} className="mb-5">
+          <SectionHeader
+            icon={Activity}
+            tone="neutral"
+            title="Other context"
+            blurb="Worth flagging — not winners, not problems."
+          />
+          <div className="space-y-2.5">
+            {context.map((sig, i) => (
+              <BeautifulSignalCard key={i} signal={sig} rank={i + 1} />
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Memory citations — chips style at the bottom */}
+      <motion.div variants={canvasReveal} className="pt-4 border-t border-border-subtle">
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <Eye size={11} strokeWidth={1.7} className="text-text-tertiary" />
+          <span className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-semibold">
+            Sources · what I read from product memory
+          </span>
         </div>
-        <ul className="space-y-1">
+        <div className="flex flex-wrap gap-1.5">
           {findings.memoryRefs.map((m, i) => (
-            <li key={i} className="text-[12px] text-text-secondary leading-relaxed flex gap-2">
-              <CheckCircle2 size={10} strokeWidth={2} className="text-[#15803D] flex-shrink-0 mt-1" />
-              <span>{m}</span>
-            </li>
+            <span
+              key={i}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-input bg-surface-page border border-border-subtle text-[11.5px] text-text-secondary"
+            >
+              <CheckCircle2 size={9} strokeWidth={2} className="text-[#15803D] flex-shrink-0" />
+              {m}
+            </span>
           ))}
-        </ul>
+        </div>
       </motion.div>
     </motion.div>
   );
 }
 
-function SignalCard({ signal }: { signal: AnalysisCampaignSignal }) {
+function SummaryStat({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  accent?: "ok" | "err";
+}) {
+  const valueColor =
+    accent === "ok" ? "text-[#15803D]" : accent === "err" ? "text-[#B91C1C]" : "text-text-primary";
+  return (
+    <div className="bg-white border border-border rounded-card px-3.5 py-3">
+      <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-semibold mb-0.5">
+        {label}
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-[22px] font-semibold tabular ${valueColor} leading-none`}>
+          {value}
+        </span>
+        <span className="text-[10.5px] text-text-tertiary truncate">{sub}</span>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({
+  icon: Icon,
+  tone,
+  title,
+  blurb,
+}: {
+  icon: typeof TrendingUp;
+  tone: "good" | "bad" | "neutral";
+  title: string;
+  blurb: string;
+}) {
+  const ringColor =
+    tone === "good"
+      ? "bg-[#F0FDF4] text-[#15803D]"
+      : tone === "bad"
+        ? "bg-[#FEE2E2] text-[#B91C1C]"
+        : "bg-surface-page text-text-secondary";
+  return (
+    <div className="flex items-center gap-2.5 mb-3">
+      <div
+        className={`inline-flex items-center justify-center w-7 h-7 rounded-full ${ringColor}`}
+      >
+        <Icon size={14} strokeWidth={1.7} />
+      </div>
+      <div>
+        <div className="text-[13px] font-semibold text-text-primary">{title}</div>
+        <div className="text-[11px] text-text-tertiary mt-0.5">{blurb}</div>
+      </div>
+    </div>
+  );
+}
+
+function BeautifulSignalCard({
+  signal,
+  rank,
+}: {
+  signal: AnalysisCampaignSignal;
+  rank: number;
+}) {
   const tone = SIGNAL_TONE[signal.tag];
   const Icon = tone.icon;
+  const iconColor =
+    signal.tag === "winner"
+      ? "text-[#15803D]"
+      : signal.tag === "decay"
+        ? "text-[#B91C1C]"
+        : signal.tag === "chronic"
+          ? "text-[#92400E]"
+          : "text-text-secondary";
+  const borderAccent =
+    signal.tag === "winner"
+      ? "border-l-[3px] border-l-[#15803D]"
+      : signal.tag === "decay"
+        ? "border-l-[3px] border-l-[#B91C1C]"
+        : signal.tag === "chronic"
+          ? "border-l-[3px] border-l-[#F5A623]"
+          : "border-l-[3px] border-l-text-tertiary/30";
   return (
-    <div className="bg-white border border-border rounded-card p-3.5">
-      <div className="flex items-start gap-3">
-        <div
-          className={`flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 ${tone.ring}`}
-        >
-          <Icon
-            size={13}
-            strokeWidth={1.7}
-            className={
-              signal.tag === "winner"
-                ? "text-[#15803D]"
-                : signal.tag === "decay"
-                  ? "text-[#B91C1C]"
-                  : signal.tag === "chronic"
-                    ? "text-[#92400E]"
-                    : "text-text-secondary"
-            }
-          />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2 mb-0.5">
-            <div className="text-[13px] font-semibold text-text-primary leading-tight">
-              {signal.name}
-            </div>
-            <span className={`pill ${tone.pill} flex-shrink-0`}>{tone.label}</span>
+    <div className={`bg-white border border-border rounded-card overflow-hidden ${borderAccent}`}>
+      <div className="px-4 py-3.5">
+        <div className="flex items-start gap-3 mb-2.5">
+          <div className={`flex items-center justify-center w-8 h-8 rounded-card flex-shrink-0 ${tone.ring}`}>
+            <Icon size={14} strokeWidth={1.7} className={iconColor} />
           </div>
-          <div className="text-[12px] text-text-secondary leading-relaxed mb-2">
-            {signal.signal}
-          </div>
-          {signal.metrics.length > 0 && (
-            <div className="grid grid-cols-3 gap-1.5">
-              {signal.metrics.map((m, i) => (
-                <MetricChip
-                  key={i}
-                  label={m.label}
-                  value={m.value}
-                  delta={m.delta}
-                  deltaTone={m.deltaTone}
-                />
-              ))}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline justify-between gap-2 mb-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[10.5px] tabular text-text-tertiary font-semibold">
+                  {String(rank).padStart(2, "0")}
+                </span>
+                <div className="text-[13.5px] font-semibold text-text-primary leading-tight truncate">
+                  {signal.name}
+                </div>
+              </div>
+              <span className={`pill ${tone.pill} flex-shrink-0`}>{tone.label}</span>
             </div>
-          )}
+            <div className="text-[12.5px] text-text-secondary leading-relaxed">
+              {signal.signal}
+            </div>
+          </div>
         </div>
+
+        {signal.metrics.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-border-subtle">
+            {signal.metrics.map((m, i) => (
+              <BeautifulMetric
+                key={i}
+                label={m.label}
+                value={m.value}
+                delta={m.delta}
+                deltaTone={m.deltaTone}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BeautifulMetric({
+  label,
+  value,
+  delta,
+  deltaTone,
+}: {
+  label: string;
+  value: string;
+  delta?: string;
+  deltaTone?: "good" | "bad";
+}) {
+  const deltaColor =
+    deltaTone === "good"
+      ? "text-[#15803D]"
+      : deltaTone === "bad"
+        ? "text-[#B91C1C]"
+        : "text-text-tertiary";
+  return (
+    <div>
+      <div className="text-[9.5px] uppercase tracking-wider text-text-tertiary font-semibold mb-0.5">
+        {label}
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-[13.5px] font-semibold text-text-primary tabular leading-none">
+          {value}
+        </span>
+        {delta && <span className={`text-[10.5px] tabular ${deltaColor}`}>{delta}</span>}
       </div>
     </div>
   );
@@ -346,13 +560,19 @@ function ClarifyStep({ workflow }: { workflow: DiagnosticWorkflow }) {
   const primeClarifyDefaults = useSpotStore((s) => s.primeClarifyDefaults);
   const setClarifyAnswer = useSpotStore((s) => s.setClarifyAnswer);
 
-  // Prime defaults on first render so the brief card has content
-  // immediately — the user just confirms.
+  // Prime defaults on first render only. We key the effect by `kind`
+  // (stable per workflow) — the questions array itself is a fresh ref
+  // every render, so it can't be in the dep list without causing a
+  // re-render loop. The store action is also a no-op once defaults are
+  // primed, so even a re-run here wouldn't trigger another render.
   useEffect(() => {
     const defaults: Record<string, string> = {};
-    for (const q of questions) defaults[q.id] = q.defaultValue;
+    for (const q of clarifyQuestionsFor(kind, analysisFor(kind))) {
+      defaults[q.id] = q.defaultValue;
+    }
     primeClarifyDefaults(defaults);
-  }, [questions, primeClarifyDefaults]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
 
   return (
     <motion.div

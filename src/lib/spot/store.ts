@@ -615,7 +615,20 @@ export const useSpotStore = create<PanelState>((set) => ({
     set((s) => {
       if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
       // Don't overwrite anything the user has already set — only fill blanks.
-      const merged = { ...defaults, ...s.workflow.clarifyAnswers };
+      // CRITICAL: bail out early if no blanks remain. The caller's useEffect
+      // can fire on every render (the questions array is a fresh ref each
+      // time), but as long as we don't return a new workflow object here,
+      // no re-render is triggered and the loop terminates.
+      const current = s.workflow.clarifyAnswers;
+      let hasBlank = false;
+      for (const key of Object.keys(defaults)) {
+        if (!(key in current)) {
+          hasBlank = true;
+          break;
+        }
+      }
+      if (!hasBlank) return {};
+      const merged = { ...defaults, ...current };
       return { workflow: { ...s.workflow, clarifyAnswers: merged } };
     }),
 
