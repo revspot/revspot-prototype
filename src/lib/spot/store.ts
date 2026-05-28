@@ -879,9 +879,11 @@ export const useSpotStore = create<PanelState>((set) => ({
         // flip planApproved so the live canvas knows the user signed
         // off (drives the dashboard recommendation feed).
         const planApproved = upcoming.endsWith("-live") ? true : s.workflow.planApproved;
-        // Also reset `ready` on the plan step so the loader shows
-        // before the plan content reveals.
-        const ready = upcoming.endsWith("-plan") ? false : s.workflow.ready;
+        // Reset `ready` on EVERY diagnostic step transition so the
+        // dark Spot loader runs through each phase (analyze →
+        // clarify → plan → live). Without this, the loader only
+        // fires on the first step and subsequent phases land cold.
+        const ready = false;
         return { ...s.workflow, step: upcoming, planApproved, ready };
       })();
 

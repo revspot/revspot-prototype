@@ -557,6 +557,43 @@ function FileBody({
     step === "opt-plan" ||
     step === "ang-plan";
 
+  // ── Diagnostic workflows (Scale · Optimize · Test Angles) ──────
+  // Render the per-step DiagnosticStep view (AnalyzeStep / ClarifyStep
+  // / PlanStep / LiveStep) regardless of which tab is selected, so the
+  // user sees the analysis after the analyze loader, the clarifying
+  // questions during clarify, the updated plan during plan, etc.
+  // Memory tab still shows product memory; ang-live + assets shows the
+  // generated creatives via AssetsFileView. (We already returned above
+  // for campaign-dive, so the narrowed kind here is one of the three
+  // diagnostic kinds or launch-campaign.)
+  if (workflow.kind !== "launch-campaign") {
+    if (tab === "memory") {
+      return (
+        <MemoryFileView
+          workflow={workflow}
+          buildingOverlay={isBuilding && tab === "memory"}
+        />
+      );
+    }
+    if (
+      workflow.kind === "test-angles" &&
+      workflow.step === "ang-live" &&
+      tab === "assets"
+    ) {
+      return (
+        <AssetsFileView
+          workflow={workflow}
+          buildingOverlay={false}
+        />
+      );
+    }
+    return (
+      <div className="px-6 py-5">
+        <DiagnosticStep workflow={workflow as DiagnosticWorkflow} />
+      </div>
+    );
+  }
+
   if (tab === "memory") {
     return <MemoryFileView workflow={workflow} buildingOverlay={isBuilding && tab === "memory"} />;
   }
@@ -1389,9 +1426,10 @@ const DEPLOY_THOUGHTS = [
   "All ads live. Watchers are armed.",
 ];
 
-/** Cycling thoughts for the diagnostic workflows · scale, optimize,
- *  test-angles · each in two phases (analyze + plan) so we can
- *  reuse the same DarkSpotLoader pattern as the launch flow. */
+/** Cycling thoughts for every phase of the three diagnostic
+ *  workflows (scale · optimize · test-angles). Each step gets the
+ *  same DarkSpotLoader pattern as the launch flow so the user
+ *  never sees the canvas freeze between steps. */
 const DIAGNOSTIC_THOUGHTS = {
   scale: {
     analyze: [
@@ -1402,12 +1440,25 @@ const DIAGNOSTIC_THOUGHTS = {
       "Modeling cost-elasticity per channel.",
       "Drafting a scale plan that won't break CPL.",
     ],
+    clarify: [
+      "Framing the scale goal…",
+      "Narrowing the option space.",
+      "Picking the right questions to ask you.",
+    ],
     plan: [
-      "Mapping winners to scale-ready audiences…",
+      "Folding your picks into the plan…",
+      "Mapping winners to scale-ready audiences.",
       "Drafting budget shifts · winners up, decay down.",
       "Adding lookalike + interest expansions per winner.",
       "Recomputing daily caps with safety margin.",
       "Locking the updated plan.",
+    ],
+    live: [
+      "Pushing winners up · trimming decay…",
+      "Activating new audience expansions.",
+      "Setting Week 1 daily caps.",
+      "Arming the scale watchers.",
+      "Scale plan is live · I'll surface results as they come in.",
     ],
   },
   optimize: {
@@ -1419,12 +1470,25 @@ const DIAGNOSTIC_THOUGHTS = {
       "Identifying the cleanest wins to act on.",
       "Drafting an optimization plan you can ship today.",
     ],
+    clarify: [
+      "Framing the optimization priority…",
+      "Narrowing where to act first.",
+      "Picking the right questions to ask you.",
+    ],
     plan: [
+      "Folding your picks into the plan…",
       "Drafting pause list · clearly broken units.",
       "Drafting creative refreshes per fatigued unit.",
       "Adding audience swaps where saturation is high.",
       "Tightening targeting on chronic underperformers.",
       "Locking the updated plan.",
+    ],
+    live: [
+      "Pausing fatigued ad sets…",
+      "Briefing the creative refreshes.",
+      "Swapping audiences in saturated cohorts.",
+      "Arming the optimize watchers.",
+      "Optimization plan is live.",
     ],
   },
   "test-angles": {
@@ -1435,66 +1499,103 @@ const DIAGNOSTIC_THOUGHTS = {
       "Brainstorming fresh angles informed by category signals.",
       "Drafting a test plan with clear success criteria.",
     ],
+    clarify: [
+      "Framing the angle hypothesis…",
+      "Narrowing the test universe.",
+      "Picking the right questions to ask you.",
+    ],
     plan: [
-      "Drafting Persona × Angle test matrix…",
+      "Drafting the Persona × Angle test matrix…",
       "Composing 3 new creative concepts per persona.",
       "Setting budget caps + minimum learn windows.",
       "Locking the test plan.",
+    ],
+    live: [
+      "Generating new creative concepts per persona…",
+      "Pushing 6 new angles to Meta.",
+      "Setting balanced traffic split.",
+      "Arming the early-stop guardrail.",
+      "6 angles are live · learning starts now.",
     ],
   },
 } as const;
 
 /** Maps a diagnostic step to (kind, phase) so we can pull the right
- *  thoughts array out of the table above. */
+ *  thoughts array out of the table above. Every diagnostic step has
+ *  a phase mapping so the loader runs through the whole flow. */
 function diagnosticPhaseFor(step: WorkflowStep): {
   kind: "scale" | "optimize" | "test-angles";
-  phase: "analyze" | "plan";
+  phase: "analyze" | "clarify" | "plan" | "live";
 } | null {
   if (step === "scale-analyze") return { kind: "scale", phase: "analyze" };
+  if (step === "scale-clarify") return { kind: "scale", phase: "clarify" };
   if (step === "scale-plan") return { kind: "scale", phase: "plan" };
+  if (step === "scale-live") return { kind: "scale", phase: "live" };
   if (step === "opt-analyze") return { kind: "optimize", phase: "analyze" };
+  if (step === "opt-clarify") return { kind: "optimize", phase: "clarify" };
   if (step === "opt-plan") return { kind: "optimize", phase: "plan" };
+  if (step === "opt-live") return { kind: "optimize", phase: "live" };
   if (step === "ang-analyze") return { kind: "test-angles", phase: "analyze" };
+  if (step === "ang-clarify") return { kind: "test-angles", phase: "clarify" };
   if (step === "ang-plan") return { kind: "test-angles", phase: "plan" };
+  if (step === "ang-live") return { kind: "test-angles", phase: "live" };
   return null;
 }
 
+type DiagPhase = "analyze" | "clarify" | "plan" | "live";
+type DiagKind = "scale" | "optimize" | "test-angles";
+
 /** Dark Spot loader for diagnostic flows · same pattern as launch.
- *  Used during scale/optimize/test-angles analyze + plan phases so
- *  the user gets the same wow experience as the launch workflow. */
+ *  Used during every phase (analyze / clarify / plan / live) so the
+ *  canvas never goes blank between steps. */
 function DiagnosticPhaseLoader({
   productName,
   kind,
   phase,
 }: {
   productName: string;
-  kind: "scale" | "optimize" | "test-angles";
-  phase: "analyze" | "plan";
+  kind: DiagKind;
+  phase: DiagPhase;
 }) {
   const showHomeView = useSpotStore((s) => s.showHomeView);
-  const verbs: Record<typeof kind, { analyze: string; plan: string }> = {
+  const verbs: Record<DiagKind, Record<DiagPhase, string>> = {
     scale: {
       analyze: "Analyzing scale opportunities for",
+      clarify: "Framing the scale brief for",
       plan: "Drafting the scale plan for",
+      live: "Pushing the scale plan live for",
     },
     optimize: {
       analyze: "Analyzing what's holding back",
+      clarify: "Framing the optimization brief for",
       plan: "Drafting the optimization plan for",
+      live: "Shipping the optimizations for",
     },
     "test-angles": {
       analyze: "Auditing current angles for",
+      clarify: "Framing the angle-test brief for",
       plan: "Drafting the angle-test plan for",
+      live: "Launching new angles for",
     },
   };
-  const agentLabels: Record<typeof kind, { analyze: string; plan: string }> = {
-    scale: { analyze: "Scale Analyst · live", plan: "Scale Planner · live" },
+  const agentLabels: Record<DiagKind, Record<DiagPhase, string>> = {
+    scale: {
+      analyze: "Scale Analyst · live",
+      clarify: "Scale Brief Agent · live",
+      plan: "Scale Planner · live",
+      live: "Scale Deploy Agent · live",
+    },
     optimize: {
       analyze: "Optimization Analyst · live",
+      clarify: "Optimization Brief Agent · live",
       plan: "Optimization Planner · live",
+      live: "Optimization Deploy Agent · live",
     },
     "test-angles": {
       analyze: "Creative Strategist · live",
+      clarify: "Angle Brief Agent · live",
       plan: "Angle Test Planner · live",
+      live: "Angle Deploy Agent · live",
     },
   };
   const thoughts = DIAGNOSTIC_THOUGHTS[kind][phase] as readonly string[];
