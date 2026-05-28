@@ -37,6 +37,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { SpotMark } from "@/components/spot/spot-mark";
+import { SpotLoader } from "@/components/spot/spot-loader";
 import { MessageBubble, TypingDots } from "@/components/spot/spot-message";
 import { useSpotStore } from "@/lib/spot/store";
 import { generateReply } from "@/lib/spot/replies";
@@ -219,7 +220,7 @@ export default function SpotPage() {
             canvasOpen ? "w-[440px]" : "flex-1"
           }`}
         >
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle bg-white/70 backdrop-blur-sm">
+          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border-subtle bg-white/70 backdrop-blur-sm">
             <button
               type="button"
               onClick={showHomeView}
@@ -228,7 +229,14 @@ export default function SpotPage() {
             >
               <Home size={14} strokeWidth={1.6} />
             </button>
-            <SpotMark size={16} />
+            {/* Logo +30% (was 16 → 21). When an agent is running, swap
+                the static mark for the orbit loader so the chat panel
+                visibly reflects work-in-progress. */}
+            {isAgentRunning ? (
+              <SpotLoader mode="orbit" size={21} className="!gap-0" />
+            ) : (
+              <SpotMark size={21} />
+            )}
             <div className="flex-1 min-w-0">
               <div className="text-[12.5px] font-semibold leading-tight">Spot</div>
               <div className="text-[10.5px] text-text-tertiary leading-tight truncate">
@@ -348,8 +356,10 @@ export default function SpotPage() {
   return (
     <div className="min-h-screen bg-[var(--chat-bg)]">
       {/* Top half: hero + composer + chips — narrow centered column so
-          the welcome moment feels intimate and Claude-like. */}
-      <div className="max-w-[780px] mx-auto w-full px-6 pt-14">
+          the welcome moment feels intimate and Claude-like.
+          Pushed down with pt-32 (vs the old pt-14) so the hero sits in
+          the visual sweet spot rather than crowding the top edge. */}
+      <div className="max-w-[780px] mx-auto w-full px-6 pt-32">
         {/* Resume banner — when a workflow is parked. We give the building
             and review states their own visual treatment so the user
             understands what's happening at a glance. */}
@@ -357,10 +367,12 @@ export default function SpotPage() {
           <WorkflowParkBanner workflow={workflow} onResume={resumeWorkflow} />
         )}
 
-        {/* Hero */}
-        <div className="flex flex-col items-center text-center mb-6">
-          <SpotMark size={40} />
-          <h1 className="text-[26px] leading-[1.2] font-semibold text-text-primary mt-4">
+        {/* Hero — bigger, breathing Spot mark. The breathe loader's soft
+            pulsing aura signals "Spot is alive · ambient agents working"
+            even when the user hasn't asked anything yet. */}
+        <div className="flex flex-col items-center text-center mb-7">
+          <SpotLoader mode="breathe" size={60} className="!gap-0" />
+          <h1 className="text-[28px] leading-[1.2] font-semibold text-text-primary mt-3">
             {timeGreeting()}, {firstName(user.name)}.
           </h1>
           <p className="text-[13.5px] text-text-secondary mt-1.5 max-w-[480px] leading-relaxed">
@@ -379,13 +391,15 @@ export default function SpotPage() {
           inputRef={inputRef}
         />
 
-        <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
-          {SUGGESTIONS.map((s) => (
+        {/* Suggestion chips — smaller, more subtle so they don't compete
+            with the Spot focus. Show just 2 chips at reduced size. */}
+        <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3">
+          {SUGGESTIONS.slice(0, 2).map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => send(s)}
-              className="inline-flex items-center h-8 px-3 rounded-full border border-border bg-white hover:border-border-hover text-[12.5px] text-text-secondary hover:text-text-primary"
+              className="inline-flex items-center h-7 px-2.5 rounded-full border border-border-subtle bg-transparent hover:bg-white hover:border-border text-[11.5px] text-text-tertiary hover:text-text-secondary transition-colors"
             >
               {s}
             </button>
@@ -394,9 +408,9 @@ export default function SpotPage() {
       </div>
 
       {/* Lower half: wider canvas. Active products row + Past chats +
-          Spot's queue. Uses the full screen width so the welcome screen
-          feels like a real workspace, not just a chat field. */}
-      <div className="max-w-[1200px] mx-auto w-full px-6 pt-10 pb-20">
+          Spot's queue. Sits well below the fold so Spot stays the focus —
+          users can scroll for context but the hero owns the welcome. */}
+      <div className="max-w-[1200px] mx-auto w-full px-6 pt-20 pb-20">
         <ActiveProductsRail />
         <div className="grid grid-cols-2 gap-3 mt-5">
           <PastChatsCard />

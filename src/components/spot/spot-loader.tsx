@@ -72,36 +72,37 @@ export function SpotLoader({
 
 /* ─── Individual variants ──────────────────────────────────────── */
 
+// Bulletproof stroke styles — passed inline via `style` so they beat
+// any framework-level CSS rule (Tailwind preflight, custom resets,
+// browser-extension overrides). Some setups were rendering the gold
+// rings as the framework's default blue stroke when set via attribute.
+const OUTER_RING: React.CSSProperties = {
+  stroke: "#C9A86A",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeDasharray: "28 90",
+  fill: "none",
+  opacity: 0.85,
+};
+const INNER_RING: React.CSSProperties = {
+  stroke: "#E8E0C8",
+  strokeWidth: 1.2,
+  strokeLinecap: "round",
+  strokeDasharray: "10 60",
+  fill: "none",
+  opacity: 0.7,
+};
+
 function SpotOrbit({ shape }: { shape: SpotLoaderShape }) {
   // Square rect or round circle for the two dashed frames.
   if (shape === "round") {
     return (
       <div className="spot-orbit">
         <svg viewBox="0 0 100 100" className="ring outer" aria-hidden>
-          <circle
-            cx="50"
-            cy="50"
-            r="48"
-            fill="none"
-            stroke="#C9A86A"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeDasharray="28 90"
-            opacity="0.85"
-          />
+          <circle cx="50" cy="50" r="48" style={OUTER_RING} />
         </svg>
         <svg viewBox="0 0 100 100" className="ring inner" aria-hidden>
-          <circle
-            cx="50"
-            cy="50"
-            r="42"
-            fill="none"
-            stroke="#E8E0C8"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            strokeDasharray="10 60"
-            opacity="0.7"
-          />
+          <circle cx="50" cy="50" r="42" style={INNER_RING} />
         </svg>
         <div className="spot-loader-core core round" />
       </div>
@@ -110,34 +111,10 @@ function SpotOrbit({ shape }: { shape: SpotLoaderShape }) {
   return (
     <div className="spot-orbit">
       <svg viewBox="0 0 100 100" className="ring outer" aria-hidden>
-        <rect
-          x="2"
-          y="2"
-          width="96"
-          height="96"
-          rx="14"
-          fill="none"
-          stroke="#C9A86A"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeDasharray="28 90"
-          opacity="0.85"
-        />
+        <rect x="2" y="2" width="96" height="96" rx="14" style={OUTER_RING} />
       </svg>
       <svg viewBox="0 0 100 100" className="ring inner" aria-hidden>
-        <rect
-          x="9"
-          y="9"
-          width="82"
-          height="82"
-          rx="11"
-          fill="none"
-          stroke="#E8E0C8"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-          strokeDasharray="10 60"
-          opacity="0.7"
-        />
+        <rect x="9" y="9" width="82" height="82" rx="11" style={INNER_RING} />
       </svg>
       <div className="spot-loader-core core" />
     </div>
