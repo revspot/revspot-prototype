@@ -42,10 +42,13 @@ import { useSpotStore } from "@/lib/spot/store";
 import { SpotMark } from "@/components/spot/spot-mark";
 import type { DiagnosticWorkflow } from "@/lib/spot/workflow";
 import {
+  analysisFor,
   answerLabel,
   clarifyQuestionsFor,
   planFor,
   PENDING_RECOMMENDATIONS,
+  type AnalysisCampaignSignal,
+  type AnalysisFindings,
   type ClarifyQuestion,
   type PendingRecommendation,
   type WorkflowPlan,
@@ -64,6 +67,11 @@ const canvasReveal: Variants = {
 
 export function DiagnosticStep({ workflow }: { workflow: DiagnosticWorkflow }) {
   switch (workflow.step) {
+    case "scale-analyze":
+    case "opt-analyze":
+    case "ang-analyze":
+      return <AnalyzeStep workflow={workflow} />;
+
     case "scale-clarify":
     case "opt-clarify":
     case "ang-clarify":
@@ -98,17 +106,243 @@ function StepHeader({ title, blurb }: { title: string; blurb: string }) {
   );
 }
 
+/**
+ * Compact label-value chip with optional ↑/↓ delta. Used inside the
+ * analysis signal cards.
+ */
+function MetricChip({
+  label,
+  value,
+  delta,
+  deltaTone,
+}: {
+  label: string;
+  value: string;
+  delta?: string;
+  deltaTone?: "good" | "bad";
+}) {
+  const deltaColor =
+    deltaTone === "good"
+      ? "text-[#15803D]"
+      : deltaTone === "bad"
+        ? "text-[#B91C1C]"
+        : "text-text-tertiary";
+  return (
+    <div className="bg-surface-page border border-border-subtle rounded-input px-2.5 py-1.5">
+      <div className="text-[10px] text-text-tertiary uppercase tracking-wider mb-0.5">{label}</div>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-[12.5px] font-medium text-text-primary tabular">{value}</span>
+        {delta && <span className={`text-[10px] tabular ${deltaColor}`}>{delta}</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * ANALYZE STEP
+ *
+ * The first step now — Spot shows what it already knows before asking
+ * the user anything. Decisions in later steps adapt to these findings.
+ * ═══════════════════════════════════════════════════════════════ */
+
+const SIGNAL_TONE: Record<
+  AnalysisCampaignSignal["tag"],
+  { pill: string; label: string; ring: string; icon: typeof TrendingUp }
+> = {
+  winner: { pill: "pill-ok", label: "Winner", ring: "bg-[#F0FDF4]", icon: TrendingUp },
+  decay: { pill: "pill-err", label: "Recent decay", ring: "bg-[#FEE2E2]", icon: TrendingDown },
+  chronic: { pill: "pill-warn", label: "Chronic", ring: "bg-[#FEF3C7]", icon: AlertTriangle },
+  neutral: { pill: "pill", label: "Underspent", ring: "bg-surface-secondary", icon: Activity },
+};
+
+function AnalyzeStep({ workflow }: { workflow: DiagnosticWorkflow }) {
+  // Wait for the agentic step to finish before revealing the analysis.
+  if (!workflow.ready) {
+    return <AnalyzeLoader />;
+  }
+  const findings = analysisFor(workflow.kind);
+
+  return (
+    <motion.div
+      className="px-5 py-5"
+      initial="hidden"
+      animate="show"
+      variants={canvasStagger}
+    >
+      <motion.div variants={canvasReveal}>
+        <StepHeader
+          title="What I'm seeing"
+          blurb="Analysis of recent performance, audience signals, and product memory before we set goals. Right pane shows the breakdown · the takeaways inform the next step."
+        />
+      </motion.div>
+
+      {/* TL;DR */}
+      <motion.div
+        variants={canvasReveal}
+        className="bg-[#FAF8F2] border border-[#E8E3D5] rounded-card p-4 mb-3"
+      >
+        <div className="flex items-start gap-2.5">
+          <SpotMark size={18} />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary mb-1">
+              Takeaway
+            </div>
+            <div className="text-[13.5px] text-text-primary leading-relaxed">
+              {findings.summary}
+            </div>
+            {findings.biggestProblem && (
+              <div className="mt-2.5 pt-2.5 border-t border-[#E8E3D5] flex items-start gap-2 text-[12px]">
+                <Target size={11} strokeWidth={1.7} className="text-text-secondary flex-shrink-0 mt-0.5" />
+                <span className="text-text-secondary">
+                  <span className="text-text-primary font-medium">Biggest problem:</span>{" "}
+                  {findings.biggestProblem}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Per-campaign signals */}
+      <motion.div variants={canvasReveal} className="mb-3">
+        <div className="label-section mb-2">By campaign · what I found</div>
+        <div className="space-y-2">
+          {findings.signals.map((sig, i) => (
+            <SignalCard key={i} signal={sig} />
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Memory references */}
+      <motion.div
+        variants={canvasReveal}
+        className="bg-white border border-border rounded-card p-3.5"
+      >
+        <div className="flex items-center gap-1.5 mb-2">
+          <Eye size={12} strokeWidth={1.7} className="text-text-secondary" />
+          <div className="label-section">What I read · product memory</div>
+        </div>
+        <ul className="space-y-1">
+          {findings.memoryRefs.map((m, i) => (
+            <li key={i} className="text-[12px] text-text-secondary leading-relaxed flex gap-2">
+              <CheckCircle2 size={10} strokeWidth={2} className="text-[#15803D] flex-shrink-0 mt-1" />
+              <span>{m}</span>
+            </li>
+          ))}
+        </ul>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function SignalCard({ signal }: { signal: AnalysisCampaignSignal }) {
+  const tone = SIGNAL_TONE[signal.tag];
+  const Icon = tone.icon;
+  return (
+    <div className="bg-white border border-border rounded-card p-3.5">
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 ${tone.ring}`}
+        >
+          <Icon
+            size={13}
+            strokeWidth={1.7}
+            className={
+              signal.tag === "winner"
+                ? "text-[#15803D]"
+                : signal.tag === "decay"
+                  ? "text-[#B91C1C]"
+                  : signal.tag === "chronic"
+                    ? "text-[#92400E]"
+                    : "text-text-secondary"
+            }
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2 mb-0.5">
+            <div className="text-[13px] font-semibold text-text-primary leading-tight">
+              {signal.name}
+            </div>
+            <span className={`pill ${tone.pill} flex-shrink-0`}>{tone.label}</span>
+          </div>
+          <div className="text-[12px] text-text-secondary leading-relaxed mb-2">
+            {signal.signal}
+          </div>
+          {signal.metrics.length > 0 && (
+            <div className="grid grid-cols-3 gap-1.5">
+              {signal.metrics.map((m, i) => (
+                <MetricChip
+                  key={i}
+                  label={m.label}
+                  value={m.value}
+                  delta={m.delta}
+                  deltaTone={m.deltaTone}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AnalyzeLoader() {
+  const agents = [
+    "memory.read",
+    "campaigns.scan",
+    "personas.fetch",
+    "competitor.scan",
+    "sentiment.audit",
+  ];
+  return (
+    <div className="px-5 py-12 flex flex-col items-center text-center">
+      <div className="relative w-14 h-14 mb-5">
+        <SpotMark size={32} className="spot-breath absolute inset-0 m-auto" />
+        <div className="absolute inset-0 rounded-full border-2 border-dashed border-border-subtle animate-[spin_4s_linear_infinite]" />
+      </div>
+      <div className="text-section-header text-text-primary mb-1.5">Analyzing</div>
+      <div className="text-meta text-text-secondary mb-5 max-w-[440px]">
+        Five agents reading recent performance, audience signals, sentiment, competitor moves,
+        and product memory — in parallel.
+      </div>
+      <div className="bg-white border border-border rounded-card p-3.5 max-w-[420px] w-full">
+        <ul className="space-y-2">
+          {agents.map((a, i) => (
+            <li key={a} className="flex items-center gap-2.5 text-[12px]">
+              <span className="relative inline-flex items-center justify-center w-3.5 h-3.5">
+                <span
+                  className="absolute inset-0 rounded-full bg-[#111] opacity-30 animate-ping"
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
+                <span className="relative w-1.5 h-1.5 rounded-full bg-[#111]" />
+              </span>
+              <span className="font-mono text-text-primary">{a}</span>
+              <span className="text-text-tertiary text-[11px]">running</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 /* ════════════════════════════════════════════════════════════════
  * CLARIFY STEP
  *
- * 2-3 questions, each with quick-pick chips. Defaults pre-selected.
- * As the user answers, a "Brief" card on the right fills in showing
- * what Spot has captured. Confirmation lives in the chat (step-cta).
+ * 2-3 questions, each with quick-pick chips. Defaults pre-selected
+ * and contextual to the analysis findings. As the user answers, a
+ * "Brief" card on the right fills in showing what Spot has captured.
+ * Confirmation lives in the chat (step-cta).
  * ═══════════════════════════════════════════════════════════════ */
 
 function ClarifyStep({ workflow }: { workflow: DiagnosticWorkflow }) {
   const kind = workflow.kind;
-  const questions = clarifyQuestionsFor(kind);
+  // Pull findings from analysis so the question options + defaults adapt
+  // to what Spot actually found (e.g. hide "Stop the decay" when no
+  // decay was detected, default "Recent decay only" when only decay was).
+  const findings = analysisFor(kind);
+  const questions = clarifyQuestionsFor(kind, findings);
   const primeClarifyDefaults = useSpotStore((s) => s.primeClarifyDefaults);
   const setClarifyAnswer = useSpotStore((s) => s.setClarifyAnswer);
 
@@ -196,7 +430,8 @@ function QuestionCard({
 
 function BriefCard({ workflow }: { workflow: DiagnosticWorkflow }) {
   const kind = workflow.kind;
-  const questions = clarifyQuestionsFor(kind);
+  const findings = analysisFor(kind);
+  const questions = clarifyQuestionsFor(kind, findings);
   const verb =
     kind === "scale" ? "Scaling" : kind === "optimize" ? "Optimizing" : "Testing angles on";
 

@@ -464,24 +464,24 @@ export const useSpotStore = create<PanelState>((set) => ({
   // first step. The right pane shows a loader; once the tool-call
   // resolves it reveals the analysis canvas + the first step CTA.
   startScaleFlow: (product) => {
-    startDiagnostic(set, "scale", product, "scale-clarify", {
+    startDiagnostic(set, "scale", product, "scale-analyze", {
       headline: `Scaling ${product.name}.`,
       intro:
-        "Before I run the full analysis, two or three quick questions on the right. I've pre-picked sensible defaults — confirm or change, then I'll work autonomously and bring you one plan to approve.",
+        "Let me pull up what I know about this product first — recent winners, audience headroom, where money's underspent. I'll lay it out on the right, and then we'll talk about goals.",
     });
   },
   startOptimizeFlow: (product) => {
-    startDiagnostic(set, "optimize", product, "opt-clarify", {
+    startDiagnostic(set, "optimize", product, "opt-analyze", {
       headline: `Optimizing ${product.name}.`,
       intro:
-        "Quick context first — three questions on the right. I've pre-picked the defaults. Confirm and I'll sweep campaigns, find root causes, and bring you one plan.",
+        "First, the analysis — I'll show you what's broken and *why* (creative fatigue, sentiment, competitor moves, landing pages). Then we'll set the priority together.",
     });
   },
   startTestAnglesFlow: (product) => {
-    startDiagnostic(set, "test-angles", product, "ang-clarify", {
+    startDiagnostic(set, "test-angles", product, "ang-analyze", {
       headline: `Testing new angles · ${product.name}.`,
       intro:
-        "Three quick questions on the right — they'll constrain what I generate. Confirm and I'll audit creatives, synthesise the pattern, and draft new angles in one go.",
+        "Auditing last 30 days of creative first — winners, losers, the pattern underneath. Then we'll set focus + budget for the test.",
     });
   },
 

@@ -31,13 +31,16 @@ export type WorkflowStep =
   | "forms"
   | "campaigns"
   | "voice-agent"
-  // Diagnostic flows — 3 steps each: clarify → plan → live
+  // Diagnostic flows — 4 steps each: analyze → clarify → plan → live
+  | "scale-analyze"
   | "scale-clarify"
   | "scale-plan"
   | "scale-live"
+  | "opt-analyze"
   | "opt-clarify"
   | "opt-plan"
   | "opt-live"
+  | "ang-analyze"
   | "ang-clarify"
   | "ang-plan"
   | "ang-live"
@@ -75,12 +78,15 @@ export const STEP_LABELS: Record<WorkflowStep, string> = {
   "voice-agent": "Voice agent",
   // diagnostic flows — pulled from EXTENDED_STEP_LABELS so the labels
   // live next to their per-flow mock content.
+  "scale-analyze": EXTENDED_STEP_LABELS["scale-analyze"],
   "scale-clarify": EXTENDED_STEP_LABELS["scale-clarify"],
   "scale-plan": EXTENDED_STEP_LABELS["scale-plan"],
   "scale-live": EXTENDED_STEP_LABELS["scale-live"],
+  "opt-analyze": EXTENDED_STEP_LABELS["opt-analyze"],
   "opt-clarify": EXTENDED_STEP_LABELS["opt-clarify"],
   "opt-plan": EXTENDED_STEP_LABELS["opt-plan"],
   "opt-live": EXTENDED_STEP_LABELS["opt-live"],
+  "ang-analyze": EXTENDED_STEP_LABELS["ang-analyze"],
   "ang-clarify": EXTENDED_STEP_LABELS["ang-clarify"],
   "ang-plan": EXTENDED_STEP_LABELS["ang-plan"],
   "ang-live": EXTENDED_STEP_LABELS["ang-live"],

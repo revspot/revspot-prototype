@@ -31,6 +31,11 @@ import {
   Layout,
   Clock,
   ArrowUpRight,
+  Target,
+  ChevronRight,
+  Eye,
+  Zap,
+  CheckCircle2,
 } from "lucide-react";
 import ProductsPage from "../products/page";
 import PersonasPage from "../personas/page";
@@ -38,11 +43,19 @@ import { PRODUCTS, type ProductSummary } from "@/lib/products-data";
 import { PERSONAS, type PersonaCreative } from "@/lib/personas-data";
 import { SpotMark } from "@/components/spot/spot-mark";
 import { useSpotStore } from "@/lib/spot/store";
+import {
+  PRODUCT_PLANS,
+  PLAN_STATUS_TONE,
+  PLAN_STATUS_LABEL,
+  PLAN_ORIGIN_LABEL,
+  type ProductPlan,
+} from "@/lib/spot/extended-flows";
 
-type TabKey = "products" | "personas" | "creatives" | "performance" | "changelog";
+type TabKey = "products" | "plans" | "personas" | "creatives" | "performance" | "changelog";
 
 const TABS: { key: TabKey; label: string; icon: typeof Package; sub: string }[] = [
   { key: "products", label: "Products", icon: Package, sub: "Briefs · USPs · constraints" },
+  { key: "plans", label: "Plans", icon: Target, sub: "Long-lived strategy per product" },
   { key: "personas", label: "Personas", icon: Users, sub: "Cross-product archetypes" },
   { key: "creatives", label: "Creatives", icon: ImageIcon, sub: "Every angle Spot has built" },
   { key: "performance", label: "Performance", icon: TrendingUp, sub: "Spend + leads · 30d roll-up" },
@@ -107,6 +120,7 @@ export default function MemoryPage() {
             <ProductsPage />
           </div>
         )}
+        {tab === "plans" && <PlansTab />}
         {tab === "personas" && (
           <div className="[&>div>div:first-child]:hidden">
             <PersonasPage />
@@ -115,6 +129,173 @@ export default function MemoryPage() {
         {tab === "creatives" && <CreativesTab />}
         {tab === "performance" && <PerformanceTab />}
         {tab === "changelog" && <ChangelogTab />}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Plans tab ──────────────────────────────────────────────── */
+
+/**
+ * Each product gets ONE long-lived plan. Spot keeps working on it,
+ * surfaces recommendations against it, and updates it as performance
+ * data comes in. The tab shows: status, goal, current phase, next
+ * decision date, pending recommendations count, and the plan's
+ * append-only history.
+ */
+function PlansTab() {
+  const active = PRODUCT_PLANS.filter((p) => p.status === "active").length;
+  const drafting = PRODUCT_PLANS.filter((p) => p.status === "drafting").length;
+  const totalRecs = PRODUCT_PLANS.reduce((s, p) => s + p.pendingRecs, 0);
+
+  return (
+    <div>
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        <Stat label="Total plans" value={PRODUCT_PLANS.length} />
+        <Stat label="Active" value={active} />
+        <Stat label="Drafting" value={drafting} />
+        <Stat label="Pending approvals" value={totalRecs} />
+      </div>
+      <div className="space-y-3">
+        {PRODUCT_PLANS.map((plan) => (
+          <PlanCardFull key={plan.id} plan={plan} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlanCardFull({ plan }: { plan: ProductPlan }) {
+  const product = PRODUCTS.find((p) => p.id === plan.productId);
+  const currentPhase = plan.phases[plan.currentPhase - 1];
+
+  return (
+    <div className="bg-white border border-border rounded-card overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-border-subtle flex items-start gap-3">
+        <div className="w-9 h-9 rounded-card bg-[#FAF8F2] border border-[#E8E3D5] flex items-center justify-center flex-shrink-0">
+          <Target size={15} strokeWidth={1.6} className="text-text-secondary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+            <span className="text-[10.5px] text-text-tertiary uppercase tracking-wider">
+              {product?.name || plan.productId}
+            </span>
+            <span className="text-[10.5px] text-text-tertiary">·</span>
+            <span className="text-[10.5px] text-text-secondary">
+              {PLAN_ORIGIN_LABEL[plan.origin]}
+            </span>
+            <span className={`pill ${PLAN_STATUS_TONE[plan.status]}`}>
+              {PLAN_STATUS_LABEL[plan.status]}
+            </span>
+            {plan.pendingRecs > 0 && (
+              <span className="pill pill-warn">
+                {plan.pendingRecs} pending approval{plan.pendingRecs === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+          <div className="text-[13.5px] font-semibold text-text-primary leading-snug">
+            {plan.goal}
+          </div>
+          <div className="text-[11.5px] text-text-tertiary mt-1">
+            {plan.dayLabel}
+            {plan.nextDecision !== "—" && ` · next decision ${plan.nextDecision}`}
+          </div>
+        </div>
+      </div>
+
+      {/* Phase timeline strip */}
+      <div className="px-4 py-3 border-b border-border-subtle bg-surface-page">
+        <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary mb-2">
+          Phase timeline
+        </div>
+        <div className="flex items-center gap-2">
+          {plan.phases.map((p, i) => {
+            const isCurrent = i === plan.currentPhase - 1;
+            const isPast = i < plan.currentPhase - 1;
+            return (
+              <div
+                key={p.id}
+                className={`flex-1 rounded-card border p-2.5 ${
+                  isCurrent
+                    ? "border-text-primary bg-white shadow-card-hover"
+                    : isPast
+                      ? "border-border bg-white opacity-60"
+                      : "border-border-subtle bg-white"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  {isPast ? (
+                    <CheckCircle2 size={10} strokeWidth={2} className="text-[#15803D]" />
+                  ) : isCurrent ? (
+                    <span className="inline-flex w-2 h-2 rounded-full bg-[#22C55E]" />
+                  ) : (
+                    <span className="inline-flex w-2 h-2 rounded-full bg-text-tertiary/40" />
+                  )}
+                  <span className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-medium">
+                    {p.week}
+                  </span>
+                </div>
+                <div
+                  className={`text-[12px] leading-snug ${
+                    isCurrent ? "text-text-primary font-medium" : "text-text-secondary"
+                  }`}
+                >
+                  {p.title}
+                </div>
+                <div className="text-[10.5px] text-text-tertiary mt-1">{p.dates}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Current actions + history */}
+      <div className="grid grid-cols-2 divide-x divide-border-subtle">
+        {currentPhase && (
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Zap size={11} strokeWidth={1.7} className="text-text-secondary" />
+              <div className="label-section">Current actions</div>
+            </div>
+            <ul className="space-y-1.5">
+              {currentPhase.actions.slice(0, 3).map((a, i) => (
+                <li
+                  key={i}
+                  className="text-[12px] text-text-primary leading-relaxed flex gap-1.5"
+                >
+                  <ChevronRight
+                    size={10}
+                    strokeWidth={1.8}
+                    className="text-text-tertiary flex-shrink-0 mt-0.5"
+                  />
+                  <span>{a}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Clock size={11} strokeWidth={1.7} className="text-text-secondary" />
+            <div className="label-section">Recent history</div>
+          </div>
+          <ol className="space-y-2">
+            {plan.history.slice(-3).reverse().map((h, i) => (
+              <li key={i} className="flex gap-2">
+                <div className="flex flex-col items-center pt-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#111]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] text-text-tertiary mb-0.5">
+                    {h.at} · {h.who === "Spot" ? <SpotMark size={9} /> : null} {h.who}
+                  </div>
+                  <div className="text-[12px] text-text-primary leading-relaxed">{h.entry}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
     </div>
   );

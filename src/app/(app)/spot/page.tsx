@@ -46,6 +46,11 @@ import { PAST_CHATS, SPOT_QUEUE, type QueueItem, type QueueStatus } from "@/lib/
 import type { SpotMessage, SpotScope } from "@/lib/spot/types";
 import { WorkflowPane } from "@/components/spot/workflow/workflow-pane";
 import { PRODUCTS, diagnoseProduct } from "@/lib/products-data";
+import {
+  planForProduct,
+  PLAN_STATUS_TONE,
+  PLAN_STATUS_LABEL,
+} from "@/lib/spot/extended-flows";
 
 // Pull live suggestions from the products library so we never propose
 // launching a product that doesn't exist. First slot = top product
@@ -716,6 +721,30 @@ function ActiveProductsRail() {
               >
                 {dx.chip}
               </span>
+
+              {/* Plan chip — long-lived plan attached to this product.
+                  Tells the user what Spot is currently working on +
+                  whether anything's waiting for them. */}
+              {(() => {
+                const plan = planForProduct(p.id);
+                if (!plan) return null;
+                return (
+                  <a
+                    href="/memory"
+                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-input bg-surface-page border border-border-subtle hover:border-border-hover transition-colors"
+                  >
+                    <span className="inline-flex w-1.5 h-1.5 rounded-full bg-[#22C55E] flex-shrink-0" />
+                    <span className="text-[11px] text-text-primary font-medium truncate flex-1">
+                      {PLAN_STATUS_LABEL[plan.status]} · {plan.dayLabel}
+                    </span>
+                    {plan.pendingRecs > 0 && (
+                      <span className="pill pill-warn flex-shrink-0" style={{ fontSize: 9.5 }}>
+                        {plan.pendingRecs} pending
+                      </span>
+                    )}
+                  </a>
+                );
+              })()}
 
               {/* Action — health-driven · dispatches to the right Spot
                   workflow based on diagnoseProduct().flow */}

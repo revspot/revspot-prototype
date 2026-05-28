@@ -114,12 +114,210 @@ export type PendingRecommendation = {
 };
 
 /* ────────────────────────────────────────────────────────────────
+ * ANALYSIS — what Spot already knows
+ *
+ * The first step for every diagnostic flow. Spot scans the product's
+ * recent performance + chats and surfaces what it's found *before*
+ * asking the user anything. The clarifying questions in the next step
+ * adapt to these findings — e.g. "Stop the decay" only appears as an
+ * option if decay was detected.
+ *
+ * In a real product these findings would be computed live; here they
+ * encode the realistic state of Guyju's mock data.
+ * ──────────────────────────────────────────────────────────────── */
+
+export type AnalysisCampaignSignal = {
+  /** Campaign name. */
+  name: string;
+  /** One-line summary of the signal. */
+  signal: string;
+  /** Tag rendered as a pill. */
+  tag: "winner" | "decay" | "chronic" | "neutral";
+  /** Compact metric chips. */
+  metrics: { label: string; value: string; delta?: string; deltaTone?: "good" | "bad" }[];
+};
+
+export type AnalysisFindings = {
+  /** Top-line tl;dr from Spot. */
+  summary: string;
+  /** Per-campaign signals. */
+  signals: AnalysisCampaignSignal[];
+  /** Whether recent decay was detected anywhere. */
+  hasDecay: boolean;
+  /** Whether chronic underperformers were detected. */
+  hasChronic: boolean;
+  /** Whether clear winners were detected. */
+  hasWinners: boolean;
+  /** What Spot thinks is the biggest single problem (drives default goal). */
+  biggestProblem?: string;
+  /** Whether there's headroom to scale. */
+  hasHeadroom: boolean;
+  /** Memory entries Spot read while analysing — cited for traceability. */
+  memoryRefs: string[];
+};
+
+/**
+ * Analysis findings per workflow kind. The Scale flow's analysis
+ * leads with winners + headroom; Optimize leads with decay + chronic;
+ * Test-Angles leads with the angle audit verdicts.
+ */
+export const SCALE_ANALYSIS: AnalysisFindings = {
+  summary:
+    "Two ad sets are winning with significant headroom left, and Brand Search is severely underspent at 100% intent. There's clear room to push without breaking what's working.",
+  signals: [
+    {
+      name: "JEE Crack · LAL · Class 11 parents",
+      signal: "Best CPL on the workspace · 28% audience saturation · room to 2× spend.",
+      tag: "winner",
+      metrics: [
+        { label: "Spend", value: "₹1.84L" },
+        { label: "CPL", value: "₹336", delta: "↓ 22%", deltaTone: "good" },
+        { label: "Qual rate", value: "14.4%", delta: "↑ 7pts", deltaTone: "good" },
+      ],
+    },
+    {
+      name: "JEE Crack · TOFU · Mentor-led hook",
+      signal: "Strongest qualified-lead pull · 52% saturation · LAL seed reaching threshold.",
+      tag: "winner",
+      metrics: [
+        { label: "Spend", value: "₹2.18L" },
+        { label: "CPL", value: "₹356", delta: "↓ 5%", deltaTone: "good" },
+        { label: "Qual %", value: "13.7%", delta: "↑ 5pts", deltaTone: "good" },
+      ],
+    },
+    {
+      name: "JEE Crack · Google Search · Brand defense",
+      signal: "Underspent by ~60% · losing 31% of branded impressions to category bidders.",
+      tag: "neutral",
+      metrics: [
+        { label: "Spend", value: "₹38K" },
+        { label: "CPL", value: "₹463" },
+        { label: "Impression share", value: "69%", delta: "↓ 8pts", deltaTone: "bad" },
+      ],
+    },
+  ],
+  hasDecay: false,
+  hasChronic: false,
+  hasWinners: true,
+  hasHeadroom: true,
+  biggestProblem:
+    "Not enough money chasing the winners — Brand Search defense alone has ₹50K/week of free volume.",
+  memoryRefs: [
+    "Memory · last 30 days · workspace audience graph",
+    "Memory · 'Mentor-led hook outperforms rank-focused hook by 31% on hold-rate' (May 24)",
+  ],
+};
+
+export const OPTIMIZE_ANALYSIS: AnalysisFindings = {
+  summary:
+    "NEET TOFU was working until two weeks ago — CPL just jumped 18% with falling qual rate. Foundation 9-10 has been underperforming since launch. Different root causes, different fixes.",
+  signals: [
+    {
+      name: "NEET Pro · TOFU · Parents-see-progress",
+      signal: "Recent decay · top Reel hit 5.2× freq · 14 negative comments · Allen launched price drop on May 12.",
+      tag: "decay",
+      metrics: [
+        { label: "CPL", value: "₹612", delta: "↑ 13%", deltaTone: "bad" },
+        { label: "Qual %", value: "9.5%", delta: "↓ 3.6pts", deltaTone: "bad" },
+        { label: "Frequency", value: "5.2×", delta: "vs 4× cap", deltaTone: "bad" },
+      ],
+    },
+    {
+      name: "Foundation 9-10 · TOFU · Lab-bench hook",
+      signal: "Chronic · never hit target CPL since launch · hook reads as 'play-school' to JEE-prep parents.",
+      tag: "chronic",
+      metrics: [
+        { label: "CPL", value: "₹657", delta: "vs ₹420 target", deltaTone: "bad" },
+        { label: "Qual %", value: "6.6%", delta: "vs 12% avg", deltaTone: "bad" },
+        { label: "Mobile bounce", value: "64%" },
+      ],
+    },
+    {
+      name: "Foundation 9-10 · /pricing landing page",
+      signal: "Mobile CTA below the fold · 71% of visitors never reach it.",
+      tag: "chronic",
+      metrics: [
+        { label: "Mobile session", value: "24s" },
+        { label: "CTA scroll depth", value: "2.4×" },
+      ],
+    },
+  ],
+  hasDecay: true,
+  hasChronic: true,
+  hasWinners: false,
+  hasHeadroom: false,
+  biggestProblem:
+    "NEET TOFU decay — three things broke at once (creative fatigue + sentiment + Allen pricing) and CPL is still climbing.",
+  memoryRefs: [
+    "Memory · creative-feedback · 'Mentor-led hook outperforms rank-focused' (May 24)",
+    "Memory · constraint · 'Avoid pressure-free framing — parents read it as unserious' (May 18)",
+    "Memory · last 14 days · sentiment scoring on Reels",
+  ],
+};
+
+export const ANGLES_ANALYSIS: AnalysisFindings = {
+  summary:
+    "Engineer Parent has 3 clear winners and 2 clear losers in the last 30 days. Winners share a pattern (specificity + autonomy), losers share an inverse one (anxiety + outcome promises). The pattern is clean enough to generate against.",
+  signals: [
+    {
+      name: "Engineer Parent · 'Mentor-led · capped at 60'",
+      signal: "Winner · best CPL on the persona · specific + authority framing.",
+      tag: "winner",
+      metrics: [
+        { label: "CPL", value: "₹312" },
+        { label: "Qual %", value: "16.8%" },
+        { label: "CTR", value: "2.81%" },
+      ],
+    },
+    {
+      name: "Engineer Parent · 'All-India ranked mocks weekly'",
+      signal: "Loser · anxiety framing · 6 of 9 top comments express stress.",
+      tag: "decay",
+      metrics: [
+        { label: "CPL", value: "₹612", delta: "vs ₹360 target", deltaTone: "bad" },
+        { label: "Hold rate", value: "21%" },
+      ],
+    },
+    {
+      name: "Engineer Parent · 'Crack JEE — guaranteed strategy'",
+      signal: "Loser · outcome promise · triggers skepticism · also flagged in memory.",
+      tag: "decay",
+      metrics: [
+        { label: "CPL", value: "₹584", delta: "vs ₹360 target", deltaTone: "bad" },
+        { label: "Qual %", value: "3.4%", deltaTone: "bad" },
+      ],
+    },
+  ],
+  hasDecay: false,
+  hasChronic: false,
+  hasWinners: true,
+  hasHeadroom: true,
+  biggestProblem:
+    "Some loud losers in the rotation are dragging the cohort CPL up — replacing them with insight-grounded angles should lift the whole portfolio.",
+  memoryRefs: [
+    "Memory · constraint · 'No outcome guarantees · legal flagged'",
+    "Memory · constraint · 'Avoid name-checking competitors'",
+    "Memory · creative-feedback · 'Mentor-led hook outperforms rank-focused by 31%'",
+  ],
+};
+
+export function analysisFor(kind: "scale" | "optimize" | "test-angles"): AnalysisFindings {
+  if (kind === "scale") return SCALE_ANALYSIS;
+  if (kind === "optimize") return OPTIMIZE_ANALYSIS;
+  return ANGLES_ANALYSIS;
+}
+
+/* ────────────────────────────────────────────────────────────────
  * CLARIFYING QUESTIONS
  *
  * Three questions per workflow kind — enough to constrain Spot's plan
  * meaningfully without overwhelming the user. Each question pre-picks
  * the default Spot would have chosen anyway (so the fastest path is
  * "scroll, confirm, go").
+ *
+ * Questions are *contextual* — they read from analysis findings to
+ * show only the options that actually apply. E.g. "Stop the decay"
+ * is only offered when decay was detected.
  * ──────────────────────────────────────────────────────────────── */
 
 export const SCALE_QUESTIONS: ClarifyQuestion[] = [
@@ -235,13 +433,94 @@ export const ANGLES_QUESTIONS: ClarifyQuestion[] = [
   },
 ];
 
-/** Convenience lookup. */
+/**
+ * Get the clarify questions for a workflow kind, *filtered against
+ * the analysis findings*. Options that don't apply to the current
+ * data are dropped; defaults are adjusted to the most useful option
+ * given what Spot found.
+ *
+ * Examples:
+ *   · Optimize · no decay detected → "Stop the recent decay" hidden,
+ *     default shifts to "Fix all of it · I'll pick".
+ *   · Optimize · only chronic problems → "Recent decay only" removed
+ *     from the scope question, default flips to "Chronic only".
+ *   · Scale · no headroom → questions don't change, but Spot would
+ *     have framed the goal differently upstream.
+ */
 export function clarifyQuestionsFor(
   kind: "scale" | "optimize" | "test-angles",
+  findings?: AnalysisFindings,
 ): ClarifyQuestion[] {
-  if (kind === "scale") return SCALE_QUESTIONS;
-  if (kind === "optimize") return OPTIMIZE_QUESTIONS;
-  return ANGLES_QUESTIONS;
+  if (kind === "scale") return contextualizeScale(SCALE_QUESTIONS, findings);
+  if (kind === "optimize") return contextualizeOptimize(OPTIMIZE_QUESTIONS, findings);
+  return contextualizeAngles(ANGLES_QUESTIONS, findings);
+}
+
+function contextualizeScale(
+  base: ClarifyQuestion[],
+  f?: AnalysisFindings,
+): ClarifyQuestion[] {
+  if (!f) return base;
+  return base.map((q) => {
+    if (q.id === "goal" && !f.hasHeadroom) {
+      // No headroom → "More leads" is a bad default; lead with efficiency.
+      return { ...q, defaultValue: "lower-cpl" };
+    }
+    return q;
+  });
+}
+
+function contextualizeOptimize(
+  base: ClarifyQuestion[],
+  f?: AnalysisFindings,
+): ClarifyQuestion[] {
+  if (!f) return base;
+  return base.map((q) => {
+    if (q.id === "priority") {
+      // Filter options based on findings + adjust default.
+      const options = q.options.filter((o) => {
+        if (o.value === "fix-decay" && !f.hasDecay) return false;
+        return true;
+      });
+      // Default = the most pressing thing Spot found.
+      let defaultValue = q.defaultValue;
+      if (f.hasDecay) defaultValue = "fix-decay";
+      else if (f.hasChronic) defaultValue = "cpl";
+      else defaultValue = "quality";
+      // If we filtered out the default, pick the first remaining.
+      if (!options.find((o) => o.value === defaultValue)) {
+        defaultValue = options[0]?.value ?? defaultValue;
+      }
+      return { ...q, options, defaultValue };
+    }
+    if (q.id === "scope") {
+      const options = q.options.filter((o) => {
+        if (o.value === "decay" && !f.hasDecay) return false;
+        if (o.value === "chronic" && !f.hasChronic) return false;
+        if (o.value === "both" && !(f.hasDecay && f.hasChronic)) return false;
+        return true;
+      });
+      let defaultValue: string;
+      if (f.hasDecay && f.hasChronic) defaultValue = "both";
+      else if (f.hasDecay) defaultValue = "decay";
+      else if (f.hasChronic) defaultValue = "chronic";
+      else defaultValue = options[0]?.value ?? q.defaultValue;
+      return { ...q, options, defaultValue };
+    }
+    return q;
+  });
+}
+
+function contextualizeAngles(
+  base: ClarifyQuestion[],
+  f?: AnalysisFindings,
+): ClarifyQuestion[] {
+  if (!f) return base;
+  // For Test New Angles, the analysis tells us which persona has the
+  // cleanest signal — bias the focus default toward that persona. Mock
+  // data points at Engineer Parent so we keep that default; in a real
+  // build this would scan winners[].personaName for the dominant one.
+  return base;
 }
 
 /** Render a captured answer (for the verification card). */
@@ -567,6 +846,178 @@ export function planFor(kind: "scale" | "optimize" | "test-angles"): WorkflowPla
 }
 
 /* ────────────────────────────────────────────────────────────────
+ * PERSISTENT PRODUCT PLAN
+ *
+ * Every product has ONE long-lived plan. The Agent keeps working on
+ * it; the user evolves it by chatting with Spot. New product → plan
+ * is created. Optimize / Scale / Test-Angles flows update the plan
+ * rather than spinning a brand-new isolated artefact.
+ *
+ * Where the plan surfaces:
+ *   · Memory > Plans tab        — canonical home
+ *   · Dashboard "Active plans"  — at-a-glance status across products
+ *   · /spot product cards       — small chip ("Week 1 of 3 · 2 recs")
+ *   · Campaigns dashboard       — each campaign cites its plan
+ * ──────────────────────────────────────────────────────────────── */
+
+export type ProductPlanHistoryEntry = {
+  at: string;
+  who: string;
+  /** Imperative: "Plan started", "Updated by Optimize flow", etc. */
+  entry: string;
+};
+
+export type ProductPlan = {
+  id: string;
+  productId: string;
+  /** Latest plan kind that updated this plan. */
+  origin: "launch" | "scale" | "optimize" | "test-angles";
+  /** Single-sentence goal the plan is chasing. */
+  goal: string;
+  /** active | watching | paused | drafting */
+  status: "active" | "watching" | "paused" | "drafting";
+  /** 1-indexed current phase. */
+  currentPhase: number;
+  /** Day X of Y (computed from dates in a real product). */
+  dayLabel: string;
+  /** Same phase shape as WorkflowPlan.phases. */
+  phases: PlanPhase[];
+  guardrails: string[];
+  /** Next decision date label. */
+  nextDecision: string;
+  /** Count of pending recommendations attributed to this plan. */
+  pendingRecs: number;
+  /** When the plan was created / last updated. */
+  createdAt: string;
+  updatedAt: string;
+  /** Append-only history — every meaningful change to the plan. */
+  history: ProductPlanHistoryEntry[];
+};
+
+/**
+ * Mock product plans — one per Guyju's product. The shape mirrors what
+ * a freshly-approved diagnostic plan would persist as.
+ */
+export const PRODUCT_PLANS: ProductPlan[] = [
+  {
+    id: "plan-jee",
+    productId: "prod-guyjus-jee",
+    origin: "scale",
+    goal:
+      "Grow qualified-lead volume 35–45% over 3 weeks while keeping CPL drift under 10%.",
+    status: "active",
+    currentPhase: 1,
+    dayLabel: "Day 4 of 17",
+    phases: SCALE_PLAN.phases,
+    guardrails: SCALE_PLAN.guardrails,
+    nextDecision: "Jun 1",
+    pendingRecs: 1, // Stage 2 budget lift waiting on approval
+    createdAt: "2026-05-24",
+    updatedAt: "2026-05-28",
+    history: [
+      {
+        at: "2026-05-24",
+        who: "Spot",
+        entry: "Plan created · scaling Engineer Parent + Self-Studier winners.",
+      },
+      {
+        at: "2026-05-25",
+        who: "Spot",
+        entry: "Stage 1 lift deployed (+25% on top 2 ad sets, staggered).",
+      },
+      {
+        at: "2026-05-28",
+        who: "Spot",
+        entry: "Stage 1 holding — CPL drift +6.4%, under 8% threshold. Stage 2 ready.",
+      },
+    ],
+  },
+  {
+    id: "plan-neet",
+    productId: "prod-guyjus-neet",
+    origin: "optimize",
+    goal:
+      "Restore NEET TOFU CPL to ₹468 by retiring fatigued creative and counter-positioning against Allen.",
+    status: "active",
+    currentPhase: 1,
+    dayLabel: "Day 2 of 17",
+    phases: OPTIMIZE_PLAN.phases,
+    guardrails: OPTIMIZE_PLAN.guardrails,
+    nextDecision: "Jun 2",
+    pendingRecs: 1, // Pause fatigued Reel waiting
+    createdAt: "2026-05-26",
+    updatedAt: "2026-05-28",
+    history: [
+      {
+        at: "2026-05-26",
+        who: "Spot",
+        entry:
+          "Plan created · 3 root causes: creative fatigue + sentiment surge + Allen pricing.",
+      },
+      {
+        at: "2026-05-27",
+        who: "Ankit Purohit",
+        entry: "Approved Week 1 fixes · paused 'Parents see weekly progress' Reel.",
+      },
+      {
+        at: "2026-05-28",
+        who: "Spot",
+        entry: "Frequency back to 4.1× · waiting on sentiment recovery in next 48 hrs.",
+      },
+    ],
+  },
+  {
+    id: "plan-foundation",
+    productId: "prod-guyjus-foundation",
+    origin: "test-angles",
+    goal:
+      "Identify a winning creative angle for Foundation that beats the current chronic CPL of ₹657.",
+    status: "drafting",
+    currentPhase: 0,
+    dayLabel: "Not started",
+    phases: ANGLES_PLAN.phases,
+    guardrails: ANGLES_PLAN.guardrails,
+    nextDecision: "—",
+    pendingRecs: 1, // Foundation landing-page ticket
+    createdAt: "2026-05-28",
+    updatedAt: "2026-05-28",
+    history: [
+      {
+        at: "2026-05-28",
+        who: "Spot",
+        entry:
+          "Plan drafted from creative audit — hook mismatch identified · landing-page ticket queued.",
+      },
+    ],
+  },
+];
+
+export function planForProduct(productId: string): ProductPlan | undefined {
+  return PRODUCT_PLANS.find((p) => p.productId === productId);
+}
+
+export const PLAN_STATUS_TONE: Record<ProductPlan["status"], string> = {
+  active: "pill-ok",
+  watching: "pill-info",
+  paused: "pill-warn",
+  drafting: "pill",
+};
+
+export const PLAN_STATUS_LABEL: Record<ProductPlan["status"], string> = {
+  active: "Active",
+  watching: "Watching",
+  paused: "Paused",
+  drafting: "Drafting",
+};
+
+export const PLAN_ORIGIN_LABEL: Record<ProductPlan["origin"], string> = {
+  launch: "Launch plan",
+  scale: "Scale plan",
+  optimize: "Optimize plan",
+  "test-angles": "Angle-test plan",
+};
+
+/* ────────────────────────────────────────────────────────────────
  * RECOMMENDATIONS FED TO THE DASHBOARD
  *
  * These are the things Spot has surfaced from active plans that need
@@ -658,55 +1109,55 @@ export function extendedIntroMessage(
   kind: "scale" | "optimize" | "test-angles" = "scale",
 ): SpotMessage | null {
   switch (step) {
+    /* ─── analyze (per kind) ──────────────────────────────────── */
+    case "scale-analyze":
+    case "opt-analyze":
+    case "ang-analyze": {
+      const verb =
+        kind === "scale"
+          ? "what's been working, what's saturated, where the headroom is"
+          : kind === "optimize"
+            ? "what's underperforming, which problems are recent vs chronic, the actual root causes"
+            : "which angles are winning, which are losing, the pattern underneath both";
+      return {
+        role: "spot",
+        parts: [
+          {
+            type: "text",
+            text: `Here's what I'm seeing on **${productName}** — ${verb}. Right pane has the breakdown. Once you've read it, we'll talk about what you want to do.`,
+          },
+          {
+            type: "step-cta",
+            label: "Got it — let's set the goal",
+            helper: "I'll fold your goal + constraints into the plan next.",
+          },
+        ],
+      };
+    }
+
     /* ─── clarify (per kind) ───────────────────────────────────── */
     case "scale-clarify":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: `Quick context before I run the full analysis on **${productName}**. Three questions on the right — I've pre-picked sensible defaults, so confirm or change.`,
-          },
-          {
-            type: "step-cta",
-            label: "Confirm · run analysis",
-            helper: "I'll work for 30-40 seconds, then present a single plan to approve.",
-            refineHint: "or change the picks on the right",
-          },
-        ],
-      };
     case "opt-clarify":
+    case "ang-clarify": {
+      const text =
+        kind === "scale"
+          ? `Three questions on the right — I've picked defaults based on what I found in the analysis. Confirm or change, then I'll fold them into the plan.`
+          : kind === "optimize"
+            ? `Three questions on the right — I've biased the defaults toward what I think the priority should be based on the analysis. Confirm or change.`
+            : `Three questions on the right — these constrain what I generate. Defaults are picked from the audit.`;
       return {
         role: "spot",
         parts: [
-          {
-            type: "text",
-            text: `Quick context before I dig in on **${productName}**. Three questions on the right.`,
-          },
+          { type: "text", text },
           {
             type: "step-cta",
-            label: "Confirm · run diagnostic",
-            helper: "I'll sweep campaigns, find root causes, and build a 3-week fix plan.",
+            label: "Confirm · build the plan",
+            helper: "I'll fold these into a time-phased plan to approve.",
             refineHint: "or change the picks on the right",
           },
         ],
       };
-    case "ang-clarify":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: `Quick context before I audit creatives on **${productName}**. Three questions on the right — these constrain what I'll generate.`,
-          },
-          {
-            type: "step-cta",
-            label: "Confirm · run creative audit",
-            helper: "I'll audit, synthesise the pattern, and propose new angles in one pass.",
-            refineHint: "or change the picks on the right",
-          },
-        ],
-      };
+    }
 
     /* ─── plan ────────────────────────────────────────────────── */
     case "scale-plan":
@@ -774,18 +1225,39 @@ export function extendedIntroMessage(
  * STEP ORDERING + LABELS + TOOL CALLS
  * ──────────────────────────────────────────────────────────────── */
 
-export const SCALE_STEPS = ["scale-clarify", "scale-plan", "scale-live", "done"] as const;
-export const OPTIMIZE_STEPS = ["opt-clarify", "opt-plan", "opt-live", "done"] as const;
-export const ANGLES_STEPS = ["ang-clarify", "ang-plan", "ang-live", "done"] as const;
+export const SCALE_STEPS = [
+  "scale-analyze",
+  "scale-clarify",
+  "scale-plan",
+  "scale-live",
+  "done",
+] as const;
+export const OPTIMIZE_STEPS = [
+  "opt-analyze",
+  "opt-clarify",
+  "opt-plan",
+  "opt-live",
+  "done",
+] as const;
+export const ANGLES_STEPS = [
+  "ang-analyze",
+  "ang-clarify",
+  "ang-plan",
+  "ang-live",
+  "done",
+] as const;
 
 export const EXTENDED_STEP_LABELS: Record<string, string> = {
-  "scale-clarify": "Setup",
+  "scale-analyze": "Analysis",
+  "scale-clarify": "Goals",
   "scale-plan": "Plan",
   "scale-live": "Running",
-  "opt-clarify": "Setup",
+  "opt-analyze": "Analysis",
+  "opt-clarify": "Goals",
   "opt-plan": "Plan",
   "opt-live": "Running",
-  "ang-clarify": "Setup",
+  "ang-analyze": "Analysis",
+  "ang-clarify": "Goals",
   "ang-plan": "Plan",
   "ang-live": "Running",
 };
@@ -800,40 +1272,61 @@ export const EXTENDED_TOOL_CALLS: Record<
   string,
   { agent: string; detail: string; delayMs: number }
 > = {
-  // Clarify → first step's brief acknowledgement.
+  // Analyze — the big agentic step. 5 parallel agents reading recent
+  // performance. Shown as parallel work in the detail string.
+  "scale-analyze": {
+    agent: "spot.analyze",
+    detail:
+      "memory.read · campaigns.scan · audience.headroom · personas.fetch · benchmarks.compare — running in parallel…",
+    delayMs: 5400,
+  },
+  "opt-analyze": {
+    agent: "spot.analyze",
+    detail:
+      "memory.read · campaigns.scan · root-cause.analyze · competitor.scan · sentiment.audit — running in parallel…",
+    delayMs: 5400,
+  },
+  "ang-analyze": {
+    agent: "spot.analyze",
+    detail:
+      "memory.read · creative.audit · pattern.synthesize · comment.scan · benchmarks.compare — running in parallel…",
+    delayMs: 5400,
+  },
+  // Clarify → just a transition + setup ack.
   "scale-clarify": {
     agent: "spot.brief",
-    detail: "loading product memory · setting up clarifying questions…",
-    delayMs: 2600,
+    detail: "framing the goal · narrowing the option space…",
+    delayMs: 1800,
   },
   "opt-clarify": {
     agent: "spot.brief",
-    detail: "loading product memory · setting up clarifying questions…",
-    delayMs: 2600,
+    detail: "framing the goal · narrowing the option space…",
+    delayMs: 1800,
   },
   "ang-clarify": {
     agent: "spot.brief",
-    detail: "loading product memory · setting up clarifying questions…",
-    delayMs: 2600,
+    detail: "framing the goal · narrowing the option space…",
+    delayMs: 1800,
   },
-  // Plan — the big one. 5 parallel agents in the detail line.
+  // Plan — now a shorter recompute since most of the work happened at
+  // analyze. Spot is just folding the user's picks in.
   "scale-plan": {
     agent: "spot.plan",
     detail:
-      "memory.read · personas.fetch · creative.audit · audience.headroom · plan.build — running in parallel…",
-    delayMs: 5800,
+      "folding your picks into the plan · sequencing phases · setting guardrails…",
+    delayMs: 3600,
   },
   "opt-plan": {
     agent: "spot.plan",
     detail:
-      "memory.read · campaigns.scan · root-cause.analyze · competitor.scan · plan.build — running in parallel…",
-    delayMs: 5800,
+      "folding your picks into the plan · sequencing fixes by effort × impact · setting guardrails…",
+    delayMs: 3600,
   },
   "ang-plan": {
     agent: "spot.plan",
     detail:
-      "memory.read · creative.audit · pattern.synthesize · creative.brief · plan.build — running in parallel…",
-    delayMs: 5800,
+      "drafting 6 angles · sizing the A/B test · setting early-stop guardrails…",
+    delayMs: 3600,
   },
   // Live — quick deploy ack.
   "scale-live": {

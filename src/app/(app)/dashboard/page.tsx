@@ -34,7 +34,12 @@ import { useCurrentUser, useCurrentWorkspaceLabel } from "@/lib/workspace-store"
 import { PRODUCTS, type ProductSummary } from "@/lib/products-data";
 import {
   PENDING_RECOMMENDATIONS,
+  PRODUCT_PLANS,
+  PLAN_STATUS_TONE,
+  PLAN_STATUS_LABEL,
+  PLAN_ORIGIN_LABEL,
   type PendingRecommendation,
+  type ProductPlan,
 } from "@/lib/spot/extended-flows";
 
 const stagger: Variants = {
@@ -252,6 +257,12 @@ export default function DashboardPage() {
       {/* Daily brief */}
       <motion.div variants={fadeUp} className="mb-5">
         <DailyBriefCard askSpot={askSpot} />
+      </motion.div>
+
+      {/* Active plans — long-lived plans Spot is working on, one per
+          product. Status + current phase + next decision at a glance. */}
+      <motion.div variants={fadeUp} className="mb-5">
+        <ActivePlansCard />
       </motion.div>
 
       {/* Metric grid — 4×2 sparkline cards */}
@@ -727,6 +738,91 @@ function DashboardRecommendation({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ─── Active plans ────────────────────────────────────────── */
+
+/**
+ * Compact summary of every active long-lived plan in the workspace.
+ * Goal · status · current phase · next decision · pending approvals
+ * count. Tapping a row drops the user into Memory > Plans.
+ */
+function ActivePlansCard() {
+  // Order plans: active first, then drafting, then watching/paused.
+  const order: ProductPlan["status"][] = ["active", "drafting", "watching", "paused"];
+  const sorted = [...PRODUCT_PLANS].sort(
+    (a, b) => order.indexOf(a.status) - order.indexOf(b.status),
+  );
+  return (
+    <div className="bg-white border border-border rounded-card overflow-hidden">
+      <div className="px-4 py-3 border-b border-border-subtle flex items-center gap-1.5">
+        <SpotMark size={12} />
+        <span className="label-section">Active plans</span>
+        <span className="flex-1" />
+        <Link
+          href="/memory"
+          className="text-[11px] text-text-tertiary hover:text-text-primary inline-flex items-center gap-1"
+        >
+          See all in Memory
+          <ArrowUpRight size={10} strokeWidth={1.8} />
+        </Link>
+      </div>
+      <div className="divide-y divide-border-subtle">
+        {sorted.map((plan) => (
+          <ActivePlanRow key={plan.id} plan={plan} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActivePlanRow({ plan }: { plan: ProductPlan }) {
+  const product = PRODUCTS.find((p) => p.id === plan.productId);
+  return (
+    <Link
+      href="/memory"
+      className="block px-4 py-3 hover-row group"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center flex-wrap gap-1.5 mb-0.5">
+            <span className="text-[12.5px] font-semibold text-text-primary">
+              {product?.name || plan.productId}
+            </span>
+            <span className="text-[10.5px] text-text-tertiary">·</span>
+            <span className="text-[10.5px] text-text-secondary">
+              {PLAN_ORIGIN_LABEL[plan.origin]}
+            </span>
+            <span className={`pill ${PLAN_STATUS_TONE[plan.status]}`}>
+              {PLAN_STATUS_LABEL[plan.status]}
+            </span>
+            {plan.pendingRecs > 0 && (
+              <span className="pill pill-warn" style={{ fontSize: 10 }}>
+                {plan.pendingRecs} pending approval{plan.pendingRecs === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+          <div className="text-[12px] text-text-secondary leading-snug truncate">
+            {plan.goal}
+          </div>
+          <div className="text-[11px] text-text-tertiary mt-0.5">
+            {plan.dayLabel}
+            {plan.nextDecision !== "—" && (
+              <>
+                <span className="mx-1">·</span>
+                next decision <span className="text-text-secondary">{plan.nextDecision}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <ArrowUpRight
+          size={13}
+          strokeWidth={1.8}
+          className="text-text-tertiary group-hover:text-text-primary flex-shrink-0"
+        />
+      </div>
+    </Link>
   );
 }
 
