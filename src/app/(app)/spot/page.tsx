@@ -218,6 +218,8 @@ export default function SpotPage() {
 
   const startLaunchFlow = useSpotStore((s) => s.startLaunchFlow);
   const startDeepResearch = useSpotStore((s) => s.startDeepResearch);
+  const submitProductSetupForm = useSpotStore((s) => s.submitProductSetupForm);
+  const exitWorkflow = useSpotStore((s) => s.exitWorkflow);
 
   // Detect "launch a campaign for X" intent. Either match X against a
   // known product in PRODUCTS (existing-product path) or fall back to a
@@ -404,6 +406,20 @@ export default function SpotPage() {
             <WorkflowPane />
           </div>
         )}
+
+        {/* New-product modal · overlays the entire workflow surface
+            on entry. Sits *above* the chat panel until the user
+            submits or cancels — exactly the Claude-style "ask the
+            user a question" pattern. After submit, the modal closes
+            and the chat starts narrating research. */}
+        {workflow.kind === "launch-campaign" &&
+          workflow.step === "product-setup" &&
+          !workflow.productSetupAnswers?.name && (
+            <ProductSetupModal
+              onSubmit={(data) => submitProductSetupForm(data)}
+              onClose={() => exitWorkflow()}
+            />
+          )}
       </div>
     );
   }
@@ -564,6 +580,228 @@ function AgentTrailIndicator({ working }: { working: boolean }) {
           <span className="spot-dot" style={{ animationDelay: "0.36s" }} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * ProductSetupModal — overlay shown on the left chat panel when the
+ * user starts a new product. Collects name + URL + files in one shot
+ * (vs the old chat-driven Q&A which felt like a one-way conversation).
+ *
+ * Sits on top of the chat column (z-50) with a soft backdrop, so the
+ * surrounding UI is visible but quiet. On submit, the parent calls
+ * submitProductSetupForm which mirrors the inputs as a user message
+ * and triggers deep research. On cancel, exitWorkflow returns to home.
+ */
+function ProductSetupModal({
+  onSubmit,
+  onClose,
+}: {
+  onSubmit: (data: { name: string; url?: string; files?: string[] }) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (files: FileList | File[]) => {
+    const names = Array.from(files).map((f) => f.name);
+    setFileNames((prev) => [...prev, ...names]);
+  };
+
+  const canSubmit = name.trim().length > 0;
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    onSubmit({
+      name: name.trim(),
+      url: url.trim() || undefined,
+      files: fileNames.length > 0 ? fileNames : undefined,
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: "rgba(20, 20, 20, 0.42)", backdropFilter: "blur(4px)" }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="product-setup-modal-title"
+    >
+      <div
+        className="w-full max-w-[460px] bg-white rounded-card border border-border overflow-hidden"
+        style={{ boxShadow: "0 24px 60px -12px rgba(0,0,0,0.28)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 pt-5 pb-4 border-b border-border-subtle">
+          <div className="flex items-center gap-2.5 mb-3">
+            <SpotMark size={18} />
+            <span className="text-[11px] uppercase tracking-wider text-text-tertiary font-medium">
+              Spot · new product
+            </span>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={onClose}
+              title="Cancel"
+              className="inline-flex items-center justify-center h-6 w-6 rounded-button text-text-tertiary hover:bg-surface-secondary hover:text-text-primary"
+            >
+              <X size={13} strokeWidth={1.6} />
+            </button>
+          </div>
+          <h2
+            id="product-setup-modal-title"
+            className="text-[15px] font-semibold text-text-primary leading-tight"
+          >
+            What are we launching?
+          </h2>
+          <p className="text-[12px] text-text-secondary mt-1 leading-relaxed">
+            Give me a name. Drop a URL or files if you have them — I&apos;ll
+            crawl what I can and write the memory.
+          </p>
+        </div>
+
+        {/* Form */}
+        <div className="px-5 py-4 space-y-3.5">
+          <div>
+            <label className="block text-[11px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">
+              Product name
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canSubmit) handleSubmit();
+              }}
+              placeholder="e.g. Guyju's Spoken English"
+              className="w-full h-9 px-3 rounded-input border border-border bg-white text-[13px] placeholder:text-text-tertiary focus:outline-none focus:border-text-primary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">
+              Brand URL{" "}
+              <span className="normal-case text-text-tertiary font-normal">
+                · optional
+              </span>
+            </label>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canSubmit) handleSubmit();
+              }}
+              placeholder="https://…"
+              className="w-full h-9 px-3 rounded-input border border-border bg-white text-[13px] placeholder:text-text-tertiary focus:outline-none focus:border-text-primary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">
+              Files{" "}
+              <span className="normal-case text-text-tertiary font-normal">
+                · brochures, decks, PDFs · optional
+              </span>
+            </label>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+              }}
+              className={`border border-dashed rounded-input px-3 py-4 text-center cursor-pointer transition-colors ${
+                dragOver
+                  ? "border-text-primary bg-surface-secondary"
+                  : "border-border hover:border-border-hover bg-surface-page"
+              }`}
+            >
+              <Paperclip
+                size={13}
+                strokeWidth={1.6}
+                className="inline text-text-tertiary mr-1.5 -mt-0.5"
+              />
+              <span className="text-[12px] text-text-secondary">
+                Drop files or{" "}
+                <span className="text-text-primary font-medium underline-offset-2 hover:underline">
+                  click to browse
+                </span>
+              </span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept=".pdf,.ppt,.pptx,.doc,.docx,.png,.jpg,.jpeg,.mp4,.mov,.webm"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0)
+                    addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {fileNames.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {fileNames.map((fn, i) => (
+                  <div
+                    key={`${fn}-${i}`}
+                    className="flex items-center gap-1.5 text-[11.5px] text-text-secondary bg-surface-page rounded-input px-2 py-1.5 border border-border-subtle"
+                  >
+                    <Paperclip
+                      size={11}
+                      strokeWidth={1.6}
+                      className="text-text-tertiary flex-shrink-0"
+                    />
+                    <span className="flex-1 truncate">{fn}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFileNames((prev) => prev.filter((_, j) => j !== i))
+                      }
+                      className="text-text-tertiary hover:text-text-primary flex-shrink-0"
+                      title="Remove"
+                    >
+                      <X size={11} strokeWidth={1.8} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-border-subtle bg-surface-page flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center h-8 px-3 rounded-button text-[12px] text-text-secondary hover:text-text-primary hover:bg-surface-secondary"
+          >
+            Cancel
+          </button>
+          <div className="flex-1" />
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[12px] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Sparkles size={11} strokeWidth={2} />
+            Start research
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

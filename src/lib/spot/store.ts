@@ -63,6 +63,14 @@ type PanelState = {
   /** Attach files during product-setup. Mirrors the attachment as a
    *  user message in the chat. */
   attachProductSetupFiles: (fileNames: string[]) => void;
+  /** Submit the new-product modal · captures name + URL + files in one
+   *  shot, mirrors the input as a user message in chat, then triggers
+   *  deep research. Replaces the chat-driven Q&A for the first step. */
+  submitProductSetupForm: (data: {
+    name: string;
+    url?: string;
+    files?: string[];
+  }) => void;
   /** Spot doesn't recognise the product — fake-research it in real-time. */
   startDeepResearch: (productName: string, attachedFiles?: string[]) => void;
   /** Start the Scale workflow against an existing product. */
@@ -313,10 +321,10 @@ export const useSpotStore = create<PanelState>((set) => ({
     }, 4500);
   },
 
-  // Kicks off the chat-driven new-product flow. The right canvas
-  // becomes a display-only "Brief building" view; the left chat asks
-  // for name → url → files in sequence. Each user answer flows
-  // through handleProductSetupAnswer below and advances the stage.
+  // Kicks off the new-product flow. The left chat panel opens a
+  // modal overlay (rendered by /spot/page.tsx) that collects name,
+  // URL, and files in one shot. On submit, submitProductSetupForm
+  // mirrors the input as a user message and triggers deep research.
   startNewProductFlow: () =>
     set(() => ({
       open: true,
@@ -339,6 +347,9 @@ export const useSpotStore = create<PanelState>((set) => ({
         productSetupStage: "name",
         productSetupAnswers: {},
       },
+      // Seed the chat with a single Spot intro line so the column
+      // isn't empty behind the modal. The modal collects the inputs;
+      // after submit, the chat starts narrating the research.
       thread: [
         {
           role: "spot",
@@ -347,13 +358,76 @@ export const useSpotStore = create<PanelState>((set) => ({
             {
               type: "text",
               text:
-                "I'll fill the brief on the right as we talk · just answer here in chat. " +
-                "First — **what should I call it?**",
+                "Tell me about it in the form — a name, a URL or files if you have them. " +
+                "I'll dispatch the Deep Research Agent and write the memory.",
             },
           ],
         },
       ],
     })),
+
+  // Modal submit — captures all three inputs at once. Mirrors the
+  // input as a single user message, then triggers deep research.
+  submitProductSetupForm: (data) => {
+    const trimmedName = data.name.trim();
+    if (!trimmedName) return;
+    const state = useSpotStore.getState();
+    const wf = state.workflow;
+    if (!wf || wf.kind !== "launch-campaign" || wf.step !== "product-setup") return;
+
+    const url = data.url?.trim() || undefined;
+    const files = data.files && data.files.length > 0 ? data.files : undefined;
+
+    // Build a user-message summary that mirrors the form back into chat.
+    // Looks like a single block, the way Claude shows a multi-field
+    // submission: name + url + file chips.
+    const lines: string[] = [`**${trimmedName}**`];
+    if (url) lines.push(`URL · ${url}`);
+    if (files) {
+      const head = files.slice(0, 3).join(", ");
+      const more = files.length > 3 ? ` +${files.length - 3} more` : "";
+      lines.push(`📎 ${head}${more}`);
+    }
+    const userMsg: SpotMessage = {
+      role: "user",
+      text: lines.join("\n"),
+    };
+
+    const reply: SpotMessage = {
+      role: "spot",
+      parts: [
+        {
+          type: "text",
+          text: `Got it — starting deep research on **${trimmedName}** now.`,
+        },
+      ],
+    };
+
+    const answers: ProductSetupAnswers = {
+      name: trimmedName,
+      url,
+      files: files ?? [],
+    };
+
+    const nextWorkflow: LaunchWorkflow = {
+      ...wf,
+      productName: trimmedName,
+      productSetupAnswers: answers,
+      productSetupStage: "ready",
+    };
+
+    set((s) => ({
+      workflow: nextWorkflow,
+      thread: [...s.thread, userMsg, reply],
+    }));
+
+    // Kick off deep research after a brief beat so the reply lands.
+    setTimeout(() => {
+      const cur = useSpotStore.getState();
+      if (cur.workflow?.step !== "product-setup") return;
+      cur.startDeepResearch(trimmedName, files ?? []);
+    }, 700);
+  },
 
   // Chat-driven product-setup Q&A · advances stage by stage. Each call
   // appends the user's answer as a chat message, stores the answer,
