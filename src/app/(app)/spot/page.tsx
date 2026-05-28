@@ -30,6 +30,7 @@ import {
   Clock,
   CheckCircle2,
   Loader2,
+  ChevronLeft,
   ChevronRight,
   X,
   PanelRightOpen,
@@ -134,22 +135,18 @@ function ResizeHandle({
 }
 
 /** Context-aware placeholder for the chat composer. Most flows just
- *  say "Ask Spot anything…"; the product-setup Q&A swaps in stage-
- *  specific hints so the user knows what to type next. */
+ *  say "Ask Spot anything…"; during product setup, the inline
+ *  question card owns the inputs so the composer is muted. */
 function composerPlaceholderFor(workflow: SpotWorkflow | null): string | undefined {
   if (
-    !workflow ||
-    workflow.kind !== "launch-campaign" ||
-    workflow.step !== "product-setup"
+    workflow &&
+    workflow.kind === "launch-campaign" &&
+    workflow.step === "product-setup" &&
+    !workflow.productSetupAnswers?.name
   ) {
-    return undefined;
+    return "Answer in the card above to continue…";
   }
-  const stage = workflow.productSetupStage ?? "name";
-  if (stage === "name") return "What should I call the product?";
-  if (stage === "url") return "Paste a URL · or type 'skip'";
-  if (stage === "files")
-    return "Attach files via 📎 · or type 'skip' to start research";
-  return "Ask Spot anything…";
+  return undefined;
 }
 
 export default function SpotPage() {
@@ -258,14 +255,14 @@ export default function SpotPage() {
     if (!t) return;
     setDraft("");
 
-    // Chat-driven product-setup Q&A · route the answer through the
-    // store's stage machine instead of the generic askSpot path.
+    // During product setup the inline question card owns the inputs;
+    // the composer is muted. Ignore any stray submissions.
     if (
       workflow &&
       workflow.kind === "launch-campaign" &&
-      workflow.step === "product-setup"
+      workflow.step === "product-setup" &&
+      !workflow.productSetupAnswers?.name
     ) {
-      useSpotStore.getState().handleProductSetupAnswer(t);
       return;
     }
 
@@ -308,13 +305,10 @@ export default function SpotPage() {
   if (workflow && !viewHomeOverride) {
     return (
       <div className="h-screen flex bg-[var(--chat-bg)]">
-        {/* Left — chat. Resizable via the drag handle on the right edge.
-            Goes full-width when the canvas is minimized. `relative` so
-            the new-product drawer can absolute-position inside it
-            without escaping into the canvas. `overflow-hidden` clips
-            the drawer's pre-mount transform off-screen. */}
+        {/* Left — chat. Resizable via the drag handle on the right
+            edge. Goes full-width when the canvas is minimized. */}
         <div
-          className="relative overflow-hidden flex flex-col border-r border-border bg-[var(--chat-bg)]"
+          className="flex flex-col border-r border-border bg-[var(--chat-bg)]"
           style={canvasOpen ? { width: `${chatWidth}px`, flex: "0 0 auto" } : { flex: 1 }}
         >
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border-subtle bg-white/70 backdrop-blur-sm">
@@ -366,6 +360,20 @@ export default function SpotPage() {
             ))}
             {pending && <TypingDots />}
             <AgentTrailIndicator working={isAgentRunning || pending} />
+
+            {/* Inline question card · appears in-thread once Spot has
+                finished preparing the intake. Three sequential
+                questions: name → URL → files. Submitting the last
+                one closes the card and kicks off deep research. */}
+            {workflow.kind === "launch-campaign" &&
+              workflow.step === "product-setup" &&
+              workflow.productSetupModalOpen === true &&
+              !workflow.productSetupAnswers?.name && (
+                <ProductSetupQuestionCard
+                  onSubmit={(data) => submitProductSetupForm(data)}
+                  onClose={() => exitWorkflow()}
+                />
+              )}
           </div>
           <div className="border-t border-border-subtle px-3 py-3 bg-white/50 backdrop-blur-sm">
             <Composer
@@ -389,19 +397,6 @@ export default function SpotPage() {
             />
           </div>
 
-          {/* New-product drawer · slides up from the bottom of *this*
-              chat column (not the whole screen) once Spot has finished
-              its "preparing intake form" tool-call. Submitting closes
-              the drawer and starts deep research; the chat narrates. */}
-          {workflow.kind === "launch-campaign" &&
-            workflow.step === "product-setup" &&
-            workflow.productSetupModalOpen === true &&
-            !workflow.productSetupAnswers?.name && (
-              <ProductSetupDrawer
-                onSubmit={(data) => submitProductSetupForm(data)}
-                onClose={() => exitWorkflow()}
-              />
-            )}
         </div>
 
         {/* Drag handle — user controls chat width. 4px visible band with
@@ -588,40 +583,32 @@ function AgentTrailIndicator({ working }: { working: boolean }) {
 }
 
 /**
- * ProductSetupDrawer — bottom drawer that slides up from the bottom
- * of the left chat panel when the user starts a new product. Mounted
- * absolutely inside the left column so it never escapes onto the
- * canvas. Three fields in one shot: name + URL + files.
+ * ProductSetupQuestionCard — Claude-style inline question card that
+ * lives inside the chat thread. Three sequential questions, one per
+ * page (1 of 3 → 2 of 3 → 3 of 3): name, URL, files.
  *
- * Animation: on mount, requestAnimationFrame flips `visible` so the
- * backdrop fades in and the panel translates from `translate-y-full`
- * to `translate-y-0` over 320ms. Closing animates back down before
- * onClose fires so the exit feels real, not a yank.
+ * The card uses a dark surface so it reads as an interactive widget
+ * separate from regular chat messages. Header has the question, page
+ * indicator with prev/next chevrons, and an X to cancel the flow.
+ * Footer has Skip (on optional pages) and Continue / Start research.
  *
- * On submit, the parent calls submitProductSetupForm which mirrors
- * the inputs as a user message + triggers deep research.
+ * Submitting the last page → onSubmit fires with all three fields →
+ * store mirrors the inputs as a user message + triggers deep research.
  */
-function ProductSetupDrawer({
+function ProductSetupQuestionCard({
   onSubmit,
   onClose,
 }: {
   onSubmit: (data: { name: string; url?: string; files?: string[] }) => void;
   onClose: () => void;
 }) {
+  const TOTAL = 3;
+  const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [fileNames, setFileNames] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const [visible, setVisible] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Slide-up on mount: defer the visible flip to the next paint so
-  // the initial render commits with translate-y-full, then we
-  // transition to translate-y-0.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setVisible(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
 
   const addFiles = (files: FileList | File[]) => {
     const names = Array.from(files).map((f) => f.name);
@@ -629,223 +616,252 @@ function ProductSetupDrawer({
   };
 
   const canSubmit = name.trim().length > 0;
+  const isLast = step === TOTAL - 1;
+  const canSkipThis = step !== 0; // name is required
 
-  const animateOutThen = (cb: () => void) => {
-    setVisible(false);
-    setTimeout(cb, 280);
-  };
-
-  const handleSubmit = () => {
+  const finish = () => {
     if (!canSubmit) return;
-    // Capture the form before the animate-out unmounts state.
-    const data = {
+    onSubmit({
       name: name.trim(),
       url: url.trim() || undefined,
       files: fileNames.length > 0 ? fileNames : undefined,
-    };
-    animateOutThen(() => onSubmit(data));
+    });
   };
 
-  const handleClose = () => animateOutThen(onClose);
+  const goNext = () => {
+    if (isLast) {
+      finish();
+    } else {
+      setStep((s) => Math.min(s + 1, TOTAL - 1));
+    }
+  };
+  const goPrev = () => setStep((s) => Math.max(s - 1, 0));
+
+  const question =
+    step === 0
+      ? "What should I call this product?"
+      : step === 1
+        ? "Got a brand URL I can crawl?"
+        : "Any files I should learn from?";
+
+  const subtitle =
+    step === 0
+      ? "I'll use this name across memory, plans, and campaigns."
+      : step === 1
+        ? "Pricing, curriculum, positioning — I'll pull whatever I can find."
+        : "Brochures, decks, PDFs — drop anything that explains the product.";
+
+  // Disable Continue when on Q1 with no name typed.
+  const continueDisabled = step === 0 && !canSubmit;
 
   return (
-    <div
-      className="absolute inset-0 z-40 flex flex-col justify-end"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="product-setup-drawer-title"
-    >
-      {/* Backdrop · contained inside the left column, not the whole
-          screen. Tap to dismiss. */}
-      <button
-        type="button"
-        onClick={handleClose}
-        aria-label="Close"
-        className={`absolute inset-0 transition-opacity duration-300 ease-out cursor-default ${
-          visible ? "opacity-100" : "opacity-0"
-        }`}
-        style={{ background: "rgba(16, 16, 16, 0.32)", backdropFilter: "blur(2px)" }}
-      />
+    <div className="my-3">
+      {/* Context line above the card · mirrors the Claude pattern */}
+      <div className="flex items-center gap-1.5 text-[11px] text-text-tertiary mb-2 ml-0.5">
+        <Sparkles size={10} strokeWidth={1.7} />
+        <span>Setting up a new product · {TOTAL} quick questions</span>
+      </div>
 
-      {/* Drawer · slides from below. Bounded to a comfortable max-
-          height so a sliver of chat peeks at the top, signalling
-          the drawer can be dismissed. */}
+      {/* The interactive card itself · dark surface to read as a widget */}
       <div
-        className={`relative bg-white border-t border-x border-border shadow-[0_-20px_50px_-10px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-out ${
-          visible ? "translate-y-0" : "translate-y-full"
-        }`}
+        className="rounded-card overflow-hidden"
         style={{
-          borderTopLeftRadius: 18,
-          borderTopRightRadius: 18,
-          maxHeight: "calc(100% - 56px)",
+          background: "#1F1F1E",
+          color: "#FAFAF8",
+          boxShadow: "0 10px 30px -10px rgba(0,0,0,0.22)",
         }}
       >
-        {/* Drag handle · purely cosmetic, signals the drawer pattern. */}
-        <div className="flex justify-center pt-2.5 pb-1">
-          <span className="block w-9 h-1 rounded-full bg-border" />
-        </div>
-
-        {/* Header — minimal, no brand chrome */}
-        <div className="px-5 pt-2 pb-4 border-b border-border-subtle">
-          <div className="flex items-start gap-3">
-            <div className="flex-1 min-w-0">
-              <h2
-                id="product-setup-drawer-title"
-                className="text-[15px] font-semibold text-text-primary leading-tight"
-              >
-                What are we launching?
-              </h2>
-              <p className="text-[12px] text-text-secondary mt-1 leading-relaxed">
-                A name is enough. Add a URL or files and I&apos;ll crawl
-                what I can before writing the memory.
-              </p>
+        {/* Header · question + pagination + close */}
+        <div className="px-4 pt-4 pb-2.5 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[14.5px] font-medium leading-snug">{question}</div>
+            <div
+              className="text-[11.5px] leading-relaxed mt-1"
+              style={{ color: "#A8A8A4" }}
+            >
+              {subtitle}
             </div>
+          </div>
+          <div
+            className="flex items-center gap-2.5 text-[11px] flex-shrink-0"
+            style={{ color: "#A8A8A4" }}
+          >
             <button
               type="button"
-              onClick={handleClose}
-              title="Cancel"
-              className="inline-flex items-center justify-center h-6 w-6 rounded-button text-text-tertiary hover:bg-surface-secondary hover:text-text-primary flex-shrink-0"
+              onClick={goPrev}
+              disabled={step === 0}
+              className="inline-flex items-center justify-center w-5 h-5 rounded hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Previous"
             >
-              <X size={13} strokeWidth={1.6} />
+              <ChevronLeft size={13} strokeWidth={1.8} />
+            </button>
+            <span className="tabular">
+              {step + 1} of {TOTAL}
+            </span>
+            <button
+              type="button"
+              onClick={goNext}
+              disabled={continueDisabled}
+              className="inline-flex items-center justify-center w-5 h-5 rounded hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Next"
+            >
+              <ChevronRight size={13} strokeWidth={1.8} />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center w-5 h-5 rounded hover:text-white transition-colors ml-0.5"
+              title="Cancel"
+            >
+              <X size={13} strokeWidth={1.8} />
             </button>
           </div>
         </div>
 
-        {/* Form · scrollable if it exceeds the drawer height. */}
-        <div className="px-5 py-4 space-y-3.5 overflow-y-auto" style={{ maxHeight: "calc(80vh - 200px)" }}>
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">
-              Product name
-            </label>
+        {/* Body · question-specific input */}
+        <div className="px-4 pt-2 pb-3">
+          {step === 0 && (
             <input
-              type="text"
               autoFocus
+              key="q-name"
+              type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && canSubmit) handleSubmit();
+                if (e.key === "Enter" && canSubmit) goNext();
               }}
               placeholder="e.g. Guyju's Spoken English"
-              className="w-full h-9 px-3 rounded-input border border-border bg-white text-[13px] placeholder:text-text-tertiary focus:outline-none focus:border-text-primary"
+              className="w-full rounded-input px-3 py-2.5 text-[13.5px] outline-none"
+              style={{
+                background: "#2A2A28",
+                color: "#FAFAF8",
+                border: "1px solid #3A3A38",
+              }}
             />
-          </div>
-
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">
-              Brand URL{" "}
-              <span className="normal-case text-text-tertiary font-normal">
-                · optional
-              </span>
-            </label>
+          )}
+          {step === 1 && (
             <input
+              autoFocus
+              key="q-url"
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && canSubmit) handleSubmit();
+                if (e.key === "Enter") goNext();
               }}
               placeholder="https://…"
-              className="w-full h-9 px-3 rounded-input border border-border bg-white text-[13px] placeholder:text-text-tertiary focus:outline-none focus:border-text-primary"
+              className="w-full rounded-input px-3 py-2.5 text-[13.5px] outline-none"
+              style={{
+                background: "#2A2A28",
+                color: "#FAFAF8",
+                border: "1px solid #3A3A38",
+              }}
             />
-          </div>
-
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">
-              Files{" "}
-              <span className="normal-case text-text-tertiary font-normal">
-                · brochures, decks, PDFs · optional
-              </span>
-            </label>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
-              }}
-              className={`border border-dashed rounded-input px-3 py-4 text-center cursor-pointer transition-colors ${
-                dragOver
-                  ? "border-text-primary bg-surface-secondary"
-                  : "border-border hover:border-border-hover bg-surface-page"
-              }`}
-            >
-              <Paperclip
-                size={13}
-                strokeWidth={1.6}
-                className="inline text-text-tertiary mr-1.5 -mt-0.5"
-              />
-              <span className="text-[12px] text-text-secondary">
-                Drop files or{" "}
-                <span className="text-text-primary font-medium underline-offset-2 hover:underline">
-                  click to browse
-                </span>
-              </span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                accept=".pdf,.ppt,.pptx,.doc,.docx,.png,.jpg,.jpeg,.mp4,.mov,.webm"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files.length > 0)
-                    addFiles(e.target.files);
-                  e.target.value = "";
+          )}
+          {step === 2 && (
+            <div>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
                 }}
-              />
-            </div>
-            {fileNames.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {fileNames.map((fn, i) => (
-                  <div
-                    key={`${fn}-${i}`}
-                    className="flex items-center gap-1.5 text-[11.5px] text-text-secondary bg-surface-page rounded-input px-2 py-1.5 border border-border-subtle"
-                  >
-                    <Paperclip
-                      size={11}
-                      strokeWidth={1.6}
-                      className="text-text-tertiary flex-shrink-0"
-                    />
-                    <span className="flex-1 truncate">{fn}</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFileNames((prev) => prev.filter((_, j) => j !== i))
-                      }
-                      className="text-text-tertiary hover:text-text-primary flex-shrink-0"
-                      title="Remove"
-                    >
-                      <X size={11} strokeWidth={1.8} />
-                    </button>
-                  </div>
-                ))}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+                }}
+                className="rounded-input px-3 py-3.5 text-center cursor-pointer transition-colors"
+                style={{
+                  background: dragOver ? "#2F2F2D" : "#262624",
+                  border: `1px dashed ${dragOver ? "#FAFAF8" : "#3A3A38"}`,
+                }}
+              >
+                <Paperclip
+                  size={12}
+                  strokeWidth={1.6}
+                  className="inline mr-1.5 -mt-0.5"
+                  style={{ color: "#A8A8A4" }}
+                />
+                <span className="text-[12px]" style={{ color: "#A8A8A4" }}>
+                  Drop files or{" "}
+                  <span className="font-medium underline-offset-2 hover:underline" style={{ color: "#FAFAF8" }}>
+                    click to browse
+                  </span>
+                </span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  accept=".pdf,.ppt,.pptx,.doc,.docx,.png,.jpg,.jpeg,.mp4,.mov,.webm"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0)
+                      addFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
               </div>
-            )}
-          </div>
+              {fileNames.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {fileNames.map((fn, i) => (
+                    <div
+                      key={`${fn}-${i}`}
+                      className="flex items-center gap-1.5 text-[11.5px] rounded-input px-2 py-1.5"
+                      style={{ background: "#262624", color: "#D6D6D2" }}
+                    >
+                      <Paperclip
+                        size={11}
+                        strokeWidth={1.6}
+                        className="flex-shrink-0"
+                        style={{ color: "#A8A8A4" }}
+                      />
+                      <span className="flex-1 truncate">{fn}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFileNames((prev) => prev.filter((_, j) => j !== i))
+                        }
+                        className="flex-shrink-0 hover:text-white"
+                        style={{ color: "#A8A8A4" }}
+                        title="Remove"
+                      >
+                        <X size={11} strokeWidth={1.8} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-border-subtle bg-surface-page flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="inline-flex items-center h-8 px-3 rounded-button text-[12px] text-text-secondary hover:text-text-primary hover:bg-surface-secondary"
-          >
-            Cancel
-          </button>
+        {/* Footer · Skip + Continue / Start research */}
+        <div className="px-4 pb-4 pt-1 flex items-center gap-2">
           <div className="flex-1" />
+          {canSkipThis && (
+            <button
+              type="button"
+              onClick={goNext}
+              className="text-[12px] py-1.5 px-3 rounded-button transition-colors"
+              style={{ color: "#A8A8A4", background: "transparent" }}
+            >
+              Skip
+            </button>
+          )}
           <button
             type="button"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[12px] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={goNext}
+            disabled={continueDisabled}
+            className="inline-flex items-center gap-1.5 text-[12px] py-1.5 px-3 rounded-button font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            style={{
+              background: continueDisabled ? "#3A3A38" : "#FAFAF8",
+              color: continueDisabled ? "#A8A8A4" : "#1F1F1E",
+            }}
           >
-            <Sparkles size={11} strokeWidth={2} />
-            Start research
+            {isLast ? "Start research" : "Continue"}
+            <ArrowRight size={11} strokeWidth={2} />
           </button>
         </div>
       </div>
