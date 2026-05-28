@@ -35,7 +35,10 @@ export type SpotLoaderProps = {
 export function SpotLoader({
   mode = "orbit",
   size = 48,
-  shape = "square",
+  // Default to "round" everywhere — the SpotMark glyph is circular,
+  // and the user-facing brand is circular orb. Pass shape="square"
+  // only in rare contexts where a rounded-square reads better.
+  shape = "round",
   label,
   sublabel,
   className = "",
@@ -206,7 +209,8 @@ export function SpotFullscreen({
   messages = DEFAULT_MESSAGES,
   size = 64,
   intervalMs = 1800,
-  shape = "square",
+  // Round by default to match the SpotMark glyph + brand identity.
+  shape = "round",
   className = "",
 }: SpotFullscreenProps) {
   const [idx, setIdx] = useState(0);

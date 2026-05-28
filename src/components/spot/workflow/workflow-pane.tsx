@@ -316,14 +316,17 @@ const RESEARCH_TASKS = [
 
 /** Status messages for the deep-research full-screen loader. Cycle
  *  every 1.8s so the user sees Spot working through each source.
- *  Mirrors what the Deep Research Agent narrates in chat. */
+ *  Each message prefixes the phase (Reading / Crawling / Pulling /
+ *  Synthesising) so it reads like a series of explicit subtasks
+ *  rather than abstract "thinking". */
 const DEEP_RESEARCH_MESSAGES = [
-  "Crawling the brand site…",
+  "Reading the URL you provided · /about, /curriculum, /pricing…",
+  "Parsing your uploaded brochures + decks…",
+  "Crawling competitor sites for positioning + price benchmarks…",
   "Pulling category signals from the open web…",
-  "Reading competitor positioning…",
+  "Sampling parent forums + category review sites…",
   "Checking the Revspot audience graph for persona overlap…",
-  "Sampling category review sites + parent forums…",
-  "Synthesising USPs and do-not-mention list…",
+  "Synthesising findings into a coherent brief…",
 ];
 
 /** Status for the "Building memory" phase that follows deep research.
@@ -331,11 +334,12 @@ const DEEP_RESEARCH_MESSAGES = [
  *  product's memory layer — different vibe from research. */
 const BUILDING_MEMORY_MESSAGES = [
   "Drafting the product tagline…",
-  "Writing the structured brief…",
-  "Proposing pricing plans…",
-  "Composing the offer slate…",
-  "Locking in USPs to lead with…",
-  "Adding the do-not-mention list to memory…",
+  "Writing the structured product brief…",
+  "Proposing pricing plans based on category benchmarks…",
+  "Composing the offer slate from competitive landscape…",
+  "Locking in the USPs to lead with…",
+  "Writing the do-not-mention list to memory…",
+  "Indexing memory for downstream agents…",
 ];
 
 function DeepResearchStep({ workflow }: { workflow: LaunchWorkflow }) {
