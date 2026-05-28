@@ -169,6 +169,10 @@ export type ResearchedMemory = {
   offers: { label: string; meta?: string }[];
   /** Structured product brief rows · Spot's read on what the product *is*. */
   brief: { icon: string; label: string; value: string }[];
+  /** Personas Spot drafted from category research. First-class part of
+   *  product memory — the launch plan opens with persona creation, so
+   *  these need to live alongside the brief from day one. */
+  personas: { name: string; meta: string; pain: string }[];
 };
 
 /** Which question of the chat-driven new-product setup is currently
@@ -970,11 +974,13 @@ export const STEP_TOOL_CALL: Partial<Record<WorkflowStep, StepToolCall>> = {
     delayMs: 5600,
   },
   // Building step — Spot is working asynchronously. The tool-call is
-  // long-ish so the user can navigate away.
+  // long-ish so the user can navigate away. Persona Builder runs first
+  // so the rest of the agents (creative, landing, forms) have personas
+  // to brief against.
   "launch-building": {
     agent: "build.execute",
     detail:
-      "Creative Agent · Resize Agent · Landing Builder · Forms Agent · Campaign Compiler — building in the background.",
+      "Persona Builder · Creative Agent · Resize Agent · Landing Builder · Forms Agent · Campaign Compiler — building in the background.",
     delayMs: 30000,
   },
   // Review step lands quickly — Spot just compiles assets for review.

@@ -675,6 +675,23 @@ export const useSpotStore = create<PanelState>((set) => ({
             { icon: "👨‍🏫", label: "Mentors", value: "Senior alumni · 1:1 monthly review" },
             { icon: "🎯", label: "Outcome", value: "Entrance-exam preparation track" },
           ],
+          personas: [
+            {
+              name: "Working professional · Aspiring fluent speaker",
+              meta: "25-34 · tier-1/2 cities · LinkedIn-active",
+              pain: "Stalled career growth from English gap",
+            },
+            {
+              name: "College student · Interview prep",
+              meta: "18-24 · semi-urban · YouTube-heavy",
+              pain: "Campus placement interviews",
+            },
+            {
+              name: "Parent · Buying for child",
+              meta: "32-45 · tier-2/3 cities · WhatsApp + Facebook",
+              pain: "Child's school confidence",
+            },
+          ],
           usps: [
             "Strongest category signal: live cohort + mentor-led delivery beats pure-recorded on retention.",
             "Pricing band sits in the median tier — room to test premium / lite variants once we have data.",
@@ -882,14 +899,11 @@ export const useSpotStore = create<PanelState>((set) => ({
           ],
         });
 
-        // Entering launch-building? Auto-park the user to the homepage so
-        // they see the "Spot working" card on /spot. The chat stays alive
-        // and full-width on the home view; the building canvas isn't
-        // useful by itself.
+        // Stay in the chat panel on launch-building — the new
+        // "Spot is working" drawer lives inline in the thread and
+        // gives the user View memory / Spot homepage actions. No
+        // forced redirect to the homepage anymore.
         const extraSetterPayload: Partial<PanelState> = {};
-        if (upcoming === "launch-building") {
-          extraSetterPayload.viewHomeOverride = true;
-        }
 
         // After the fake delay, flip the tool-call to done + append the
         // step intro. Step itself already advanced.

@@ -180,13 +180,20 @@ function HandoffPart({ kind, label, reason }: { kind: GuidedKind; label: string;
 
 function StepCtaPart({ label, helper, refineHint }: { label: string; helper?: string; refineHint?: string }) {
   const advanceWorkflow = useSpotStore((s) => s.advanceWorkflow);
+  const appendMessage = useSpotStore((s) => s.appendMessage);
   // Compact inline CTA — no boxy card. Button + tiny helper underneath,
-  // sized like a chat reply rather than a banner.
+  // sized like a chat reply rather than a banner. Clicking echoes the
+  // label as a user message so the chat reads as a real decision the
+  // user made, not a silent auto-advance.
+  const handleClick = () => {
+    appendMessage({ role: "user", text: label });
+    advanceWorkflow();
+  };
   return (
     <div className="mb-2">
       <button
         type="button"
-        onClick={() => advanceWorkflow()}
+        onClick={handleClick}
         className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-[#111] text-[#FAFAF8] hover:bg-black text-[11.5px] font-medium"
       >
         {label}

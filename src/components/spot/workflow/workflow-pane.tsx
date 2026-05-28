@@ -495,6 +495,9 @@ function researchedMemoryToMd(
   const brief = m.brief
     .map((r) => `- ${r.icon} **${r.label}** · ${r.value}`)
     .join("\n");
+  const personas = (m.personas ?? [])
+    .map((p) => `- **${p.name}** · ${p.meta} · pain: ${p.pain}`)
+    .join("\n");
   const pricing = m.pricing
     .map(
       (p) =>
@@ -518,7 +521,7 @@ ${m.tagline}
 
 ${brief}
 
-## Pricing
+${personas ? `## Personas\n\n${personas}\n\n` : ""}## Pricing
 
 ${pricing}
 
@@ -624,11 +627,11 @@ function MemoryFileView({
  * tool-call delayMs (5600).
  */
 const PLAN_BUILD_AGENTS: { id: string; label: string; duration: number }[] = [
-  { id: "memory.read", label: "Reading product brief from memory", duration: 700 },
-  { id: "personas.fetch", label: "Pulling persona signals from the audience graph", duration: 900 },
+  { id: "personas.draft", label: "Drafting personas from category research", duration: 1100 },
+  { id: "memory.read", label: "Cross-referencing product memory", duration: 700 },
   { id: "media.plan", label: "Drafting media mix · Meta · Google · WhatsApp", duration: 1000 },
   { id: "creative.brief", label: "Composing creative angles per persona", duration: 1000 },
-  { id: "rollout.sequence", label: "Sequencing the 14-day rollout", duration: 1100 },
+  { id: "rollout.sequence", label: "Sequencing the 14-day rollout", duration: 900 },
   { id: "budget.lock", label: "Locking budget allocations", duration: 900 },
 ];
 
@@ -866,10 +869,17 @@ function buildNewProductPlanMd(productName: string): string {
 
 _Drafted just now · 14-day rollout · Conservative experiment_
 
-A small-budget, persona-led launch to learn what wins before we scale. One campaign per persona, three creative angles each, tight feedback loop on CPL and qualification.
+A small-budget, persona-led launch to learn what wins before we scale. Personas come first — once we know who we're targeting, media mix and creative briefs follow. One campaign per persona, three creative angles each, tight feedback loop on CPL and qualification.
+
+## Personas
+
+- **Working professional · Aspiring fluent speaker** · 25-34 · tier-1/2 cities · LinkedIn-active · pain: stalled career growth from English gap
+- **College student · Interview prep** · 18-24 · semi-urban · YouTube-heavy · pain: campus placement interviews
+- **Parent · Buying for child** · 32-45 · tier-2/3 cities · WhatsApp + Facebook · pain: child's school confidence
 
 ## Phase 1 · Day 1-2 · Setup
 
+- Lock the 3 personas above + write briefs to product memory
 - Provision pixel + Conversion API for the brand site
 - Build 3 landing pages — one per persona
 - Wire Meta lead forms + WhatsApp click-to-chat

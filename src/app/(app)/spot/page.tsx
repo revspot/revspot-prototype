@@ -165,9 +165,9 @@ export default function SpotPage() {
 
   const [draft, setDraft] = useState("");
   // Chat-panel width (px) — user-resizable via the divider drag handle.
-  // Default ~30% wider than before (620 → 800) so the chat reads as
-  // the primary surface even with the canvas open.
-  const [chatWidth, setChatWidth] = useState(800);
+  // Default sized so the chat is the primary surface even with the
+  // canvas open (~10% wider than the previous 800).
+  const [chatWidth, setChatWidth] = useState(880);
   const [pending, setPending] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -378,6 +378,21 @@ export default function SpotPage() {
                   onClose={() => exitWorkflow()}
                 />
               )}
+
+            {/* "Spot is working in the background" drawer · appears
+                when the plan was approved and execution agents are
+                running. The user can view memory or park to the
+                home view from here. */}
+            {workflow.kind === "launch-campaign" &&
+              workflow.step === "launch-building" && (
+                <SpotWorkingDrawer
+                  productName={workflow.productName}
+                  onViewMemory={() =>
+                    useSpotStore.getState().focusCanvasFile("memory")
+                  }
+                  onGoHome={() => showHomeView()}
+                />
+              )}
           </div>
           <div className="border-t border-border-subtle px-3 py-3 bg-white/50 backdrop-blur-sm">
             <Composer
@@ -440,13 +455,17 @@ export default function SpotPage() {
   if (!isEmpty && !viewHomeOverride) {
     return (
       <div className="min-h-screen flex flex-col bg-[var(--chat-bg)]">
-        {/* Top bar */}
+        {/* Top bar · file picker exposed here too so the user can dip
+            into memory / plan / dashboard / assets without rejoining
+            a workflow. Picker is hidden when no workflow context is
+            scoped (workspace) — nothing to preview. */}
         <div className="flex items-center gap-2 px-6 py-3 border-b border-border-subtle bg-white/70 backdrop-blur-sm">
           <SpotMark size={18} />
           <div className="flex-1">
             <div className="text-[13px] font-semibold leading-tight">Spot</div>
             <div className="text-[11px] text-text-tertiary leading-tight">Scoped to {scope.label}</div>
           </div>
+          {workflow && <ChatHeaderFilePicker compact />}
           <button
             type="button"
             onClick={() => setThread([])}
@@ -467,7 +486,7 @@ export default function SpotPage() {
         {/* Conversation · wider column (+30%) so the chat reads as
             the primary surface, not a narrow strip. */}
         <div ref={threadScrollRef} className="flex-1 overflow-y-auto scroll">
-          <div className="max-w-[940px] mx-auto w-full px-6 py-8">
+          <div className="max-w-[1040px] mx-auto w-full px-6 py-8">
             {thread.map((m, i) => (
               <MessageBubble key={i} message={m} animate={i === thread.length - 1} />
             ))}
@@ -478,7 +497,7 @@ export default function SpotPage() {
         {/* Composer pinned at the bottom — standard chat layout once
             we're in conversation mode. */}
         <div className="border-t border-border-subtle bg-white/50 backdrop-blur-sm">
-          <div className="max-w-[940px] mx-auto w-full px-6 py-4">
+          <div className="max-w-[1040px] mx-auto w-full px-6 py-4">
             <Composer
               value={draft}
               onChange={setDraft}
@@ -589,6 +608,73 @@ function AgentTrailIndicator({ working }: { working: boolean }) {
           <span className="spot-dot" style={{ animationDelay: "0.36s" }} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * SpotWorkingDrawer · the inline "I'm working in the background"
+ * card the chat lands on after the user approves the plan. Minimal,
+ * neat. Pulsing green dot + headline + one-line copy + two muted
+ * actions (View memory, Spot homepage). Sized like a chat reply.
+ */
+function SpotWorkingDrawer({
+  productName,
+  onViewMemory,
+  onGoHome,
+}: {
+  productName: string;
+  onViewMemory: () => void;
+  onGoHome: () => void;
+}) {
+  return (
+    <div className="mt-4 mb-1">
+      <div
+        className="bg-white border border-border rounded-card overflow-hidden"
+        style={{ boxShadow: "0 8px 24px -10px rgba(0,0,0,0.10)" }}
+      >
+        {/* Header strip · pulsing dot + working tag */}
+        <div className="px-4 pt-4 pb-2 flex items-center gap-2">
+          <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#15803D]">
+            <span className="absolute inset-0 rounded-full bg-[#15803D] opacity-50 animate-ping" />
+          </span>
+          <span className="text-[10.5px] uppercase tracking-wider font-semibold text-[#15803D]">
+            Spot is working in the background
+          </span>
+        </div>
+
+        {/* Body */}
+        <div className="px-4 pb-3">
+          <div className="text-[14px] font-semibold text-text-primary leading-snug">
+            Building everything for {productName}.
+          </div>
+          <p className="text-[12.5px] text-text-secondary mt-1.5 leading-relaxed">
+            Personas, creatives, landing pages, lead forms, and campaigns
+            are spinning up in parallel. I&apos;ll notify you the moment
+            there&apos;s something to approve — feel free to step away.
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="px-4 pb-4 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onViewMemory}
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-button border border-border bg-white hover:border-border-hover text-[12px] text-text-primary"
+          >
+            View project memory
+            <ArrowRight size={11} strokeWidth={1.8} className="text-text-tertiary" />
+          </button>
+          <button
+            type="button"
+            onClick={onGoHome}
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-button text-[12px] text-text-secondary hover:text-text-primary hover:bg-surface-secondary"
+          >
+            <Home size={11} strokeWidth={1.7} />
+            Back to Spot homepage
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
