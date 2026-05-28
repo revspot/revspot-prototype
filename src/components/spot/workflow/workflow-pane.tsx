@@ -616,16 +616,245 @@ function MemoryFileView({
   );
 }
 
-/** Cycling labels for the plan-building loader. Same shape as the
- *  deep-research labels but framed around plan composition. */
-const PLAN_BUILDING_LABELS = [
-  "Reading the product brief from memory",
-  "Pulling persona signals from the audience graph",
-  "Drafting media mix · Meta · Google · WhatsApp",
-  "Composing creative angles per persona",
-  "Sequencing the 14-day rollout",
-  "Locking budget allocations",
+/**
+ * Sub-agents driving the plan build. Each one runs sequentially; the
+ * loader animates from queued → running → done as the fake timeline
+ * progresses, so the canvas reads like real parallel-ish agent work
+ * instead of a single spinner. Durations sum to the launch-plan
+ * tool-call delayMs (5600).
+ */
+const PLAN_BUILD_AGENTS: { id: string; label: string; duration: number }[] = [
+  { id: "memory.read", label: "Reading product brief from memory", duration: 700 },
+  { id: "personas.fetch", label: "Pulling persona signals from the audience graph", duration: 900 },
+  { id: "media.plan", label: "Drafting media mix · Meta · Google · WhatsApp", duration: 1000 },
+  { id: "creative.brief", label: "Composing creative angles per persona", duration: 1000 },
+  { id: "rollout.sequence", label: "Sequencing the 14-day rollout", duration: 1100 },
+  { id: "budget.lock", label: "Locking budget allocations", duration: 900 },
 ];
+
+/**
+ * Plan-building loader · the canvas's hero loading state when the
+ * launch-plan agent is running. Three coordinated parts:
+ *
+ *   1. Header  — title + smooth progress bar that fills over 5.6s
+ *   2. Skeleton — shimmering blocks shaped like the plan structure
+ *      (H1, properties, tagline, phase blocks) so the reveal at
+ *      the end is a smooth swap, not a jarring layout shift
+ *   3. Agent strip — checklist of the 6 sub-agents, each flipping
+ *      from queued → running (spinner) → done (check) as their
+ *      slice of the timeline elapses
+ *
+ * Beats the previous centred-orb-in-a-card because (a) the skeleton
+ * previews the destination layout, (b) the progress bar gives a
+ * real sense of "almost there", (c) the agent strip makes Spot's
+ * work visible and concrete.
+ */
+function PlanBuildingLoader({ productName }: { productName: string }) {
+  const TOTAL_MS = PLAN_BUILD_AGENTS.reduce((s, a) => s + a.duration, 0);
+  const [doneCount, setDoneCount] = useState(0);
+  const [progress, setProgress] = useState(2);
+
+  // Advance the agent checklist on each agent's duration boundary.
+  useEffect(() => {
+    setDoneCount(0);
+    let cumulative = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    PLAN_BUILD_AGENTS.forEach((a, i) => {
+      cumulative += a.duration;
+      timers.push(setTimeout(() => setDoneCount(i + 1), cumulative));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // Smoothly fill the progress bar over the total duration.
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(98, (elapsed / TOTAL_MS) * 100);
+      setProgress(pct);
+      if (pct >= 98) clearInterval(id);
+    }, 80);
+    return () => clearInterval(id);
+  }, [TOTAL_MS]);
+
+  return (
+    <div className="px-6 py-6 max-w-[760px] mx-auto">
+      {/* Header — running indicator + title + progress */}
+      <div className="mb-7">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider font-semibold text-[#15803D]">
+            <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#15803D]">
+              <span className="absolute inset-0 rounded-full bg-[#15803D] opacity-50 animate-ping" />
+            </span>
+            Spot is drafting
+          </span>
+        </div>
+        <h1 className="text-[20px] font-semibold text-text-primary tracking-tight leading-tight">
+          Drafting the launch plan for{" "}
+          <span className="text-text-primary">{productName}</span>
+        </h1>
+        <div className="text-[12px] text-text-secondary mt-1.5 leading-relaxed">
+          Six agents running in parallel — reading memory, pulling personas,
+          drafting media mix, sequencing the rollout, locking budget.
+        </div>
+
+        {/* Progress bar */}
+        <div className="mt-4">
+          <div className="h-1 bg-surface-page rounded-full overflow-hidden">
+            <div
+              className="h-full transition-all duration-300 ease-out"
+              style={{
+                width: `${progress}%`,
+                background:
+                  "linear-gradient(90deg, #C9A86A 0%, #E0C083 60%, #15803D 100%)",
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-[10.5px] text-text-tertiary tabular">
+              {Math.round(progress)}%
+            </span>
+            <span className="text-[10.5px] text-text-tertiary tabular">
+              {doneCount} of {PLAN_BUILD_AGENTS.length} agents complete
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Skeleton — previews the destination plan layout so the
+          eventual reveal lands as a smooth swap, not a jump. */}
+      <div className="space-y-5 mb-7">
+        {/* H1 + properties + tagline-callout */}
+        <div>
+          <div className="skeleton h-8 w-3/5 rounded mb-2.5" />
+          <div className="flex gap-1.5 mb-3">
+            <div className="skeleton h-4 w-16 rounded-full" />
+            <div className="skeleton h-4 w-20 rounded-full" />
+            <div className="skeleton h-4 w-14 rounded-full" />
+          </div>
+          <div
+            className="rounded-card border-l-4 px-4 py-3 space-y-1.5"
+            style={{ borderLeftColor: "#E8E3D5", background: "#FAF8F2" }}
+          >
+            <div className="skeleton h-3 w-full rounded" />
+            <div className="skeleton h-3 w-11/12 rounded" />
+            <div className="skeleton h-3 w-2/3 rounded" />
+          </div>
+        </div>
+
+        {/* Phase blocks */}
+        {[
+          { titleW: "w-1/3", lines: 3 },
+          { titleW: "w-2/5", lines: 4 },
+          { titleW: "w-1/3", lines: 3 },
+          { titleW: "w-1/4", lines: 3 },
+        ].map((phase, i) => (
+          <div key={i} className="space-y-2">
+            <div className="flex items-center gap-2 pb-1.5 border-b border-border-subtle mb-2.5">
+              <span className="w-1 h-1 rounded-full bg-[#C9A86A]" />
+              <div className={`skeleton h-4 ${phase.titleW} rounded`} />
+            </div>
+            {Array.from({ length: phase.lines }).map((_, j) => (
+              <div key={j} className="flex gap-2.5">
+                <span className="w-1 h-1 rounded-full bg-border mt-2 flex-shrink-0" />
+                <div
+                  className={`skeleton h-3 rounded ${
+                    j % 3 === 0 ? "w-full" : j % 3 === 1 ? "w-11/12" : "w-3/4"
+                  }`}
+                />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* Agent strip · concrete sub-tasks flipping done one at a time */}
+      <div className="bg-white border border-border rounded-card overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border-subtle bg-surface-page flex items-center gap-2">
+          <Cog
+            size={11}
+            strokeWidth={1.8}
+            className="text-text-secondary animate-spin"
+            style={{ animationDuration: "2.4s" }}
+          />
+          <span className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-semibold">
+            Agents at work
+          </span>
+        </div>
+        <ul className="divide-y divide-border-subtle">
+          {PLAN_BUILD_AGENTS.map((a, i) => {
+            const done = i < doneCount;
+            const running = i === doneCount;
+            const queued = i > doneCount;
+            return (
+              <li
+                key={a.id}
+                className={`flex items-center gap-2.5 px-4 py-2 transition-colors ${
+                  done
+                    ? "bg-[#F0FDF4]/40"
+                    : running
+                      ? "bg-[#FAF8F2]"
+                      : ""
+                }`}
+              >
+                {/* Status glyph */}
+                <span className="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
+                  {done && (
+                    <CheckCircle2
+                      size={13}
+                      strokeWidth={2}
+                      className="text-[#15803D]"
+                    />
+                  )}
+                  {running && (
+                    <Cog
+                      size={12}
+                      strokeWidth={1.8}
+                      className="text-text-primary animate-spin"
+                      style={{ animationDuration: "1.2s" }}
+                    />
+                  )}
+                  {queued && (
+                    <span className="w-2.5 h-2.5 rounded-full border border-border-subtle" />
+                  )}
+                </span>
+                <span
+                  className={`font-mono text-[11px] tabular ${
+                    queued ? "text-text-tertiary" : "text-text-secondary"
+                  }`}
+                >
+                  {a.id}
+                </span>
+                <span
+                  className={`text-[12.5px] flex-1 truncate ${
+                    queued
+                      ? "text-text-tertiary"
+                      : done
+                        ? "text-text-secondary"
+                        : "text-text-primary font-medium"
+                  }`}
+                >
+                  {a.label}
+                </span>
+                {running && (
+                  <span className="text-[10.5px] uppercase tracking-wider text-[#8C6D33] font-semibold flex-shrink-0">
+                    running…
+                  </span>
+                )}
+                {done && (
+                  <span className="text-[10.5px] uppercase tracking-wider text-[#15803D] font-semibold flex-shrink-0">
+                    done
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 /** Hard-coded launch plan template for brand-new products. Substitutes
  *  the product name everywhere so the canvas isn't blank after the
@@ -721,15 +950,7 @@ function PlanFileView({
     planBuilding &&
     workflow.kind === "launch-campaign"
   ) {
-    return (
-      <div className="h-full flex items-center justify-center px-6 py-12">
-        <SpotFullscreen
-          title={`Drafting the plan for ${workflow.productName}`}
-          messages={PLAN_BUILDING_LABELS}
-          size={64}
-        />
-      </div>
-    );
+    return <PlanBuildingLoader productName={workflow.productName} />;
   }
 
   // New product (no saved files) post-build · render the generic
