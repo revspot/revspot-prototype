@@ -67,10 +67,10 @@ type PanelState = {
   gotoStep: (step: WorkflowStep) => void;
   setWorkflowBudget: (b: WorkflowBudget) => void;
   toggleWorkflowApproval: (group: "personaIds" | "angleIds" | "formIds", id: string) => void;
-  /** Toggle a pick at a Diagnostic step (scaling strategy / fix / angle). */
-  toggleDiagnosticPick: (id: string) => void;
-  /** Set the focused problem at the Optimize root-cause step. */
-  focusProblem: (problemId: string) => void;
+  /** Set an answer at the clarify step (questionId → optionId). */
+  setClarifyAnswer: (questionId: string, value: string) => void;
+  /** Pre-populate all clarify defaults at once (called on entering clarify). */
+  primeClarifyDefaults: (defaults: Record<string, string>) => void;
   /** Pick / change the voice agent attached to outbound campaigns. */
   attachVoiceAgent: (agentId: string | null) => void;
   exitWorkflow: () => void;
@@ -137,8 +137,8 @@ function startDiagnostic(
       productName: product.name,
       startedAt: Date.now(),
       ready: false,
-      selectedIds: [],
-      focusedProblemId: null,
+      clarifyAnswers: {},
+      planApproved: false,
     },
     thread: [
       {
@@ -464,24 +464,24 @@ export const useSpotStore = create<PanelState>((set) => ({
   // first step. The right pane shows a loader; once the tool-call
   // resolves it reveals the analysis canvas + the first step CTA.
   startScaleFlow: (product) => {
-    startDiagnostic(set, "scale", product, "scale-analyze", {
+    startDiagnostic(set, "scale", product, "scale-clarify", {
       headline: `Scaling ${product.name}.`,
       intro:
-        "Pulling 30-day performance — I'll figure out what's winning, then propose how to scale it without breaking it.",
+        "Before I run the full analysis, two or three quick questions on the right. I've pre-picked sensible defaults — confirm or change, then I'll work autonomously and bring you one plan to approve.",
     });
   },
   startOptimizeFlow: (product) => {
-    startDiagnostic(set, "optimize", product, "opt-diagnose", {
+    startDiagnostic(set, "optimize", product, "opt-clarify", {
       headline: `Optimizing ${product.name}.`,
       intro:
-        "Sweeping campaigns for what's underperforming — both recent decay and chronic losers. I'll separate the two and find the actual root cause.",
+        "Quick context first — three questions on the right. I've pre-picked the defaults. Confirm and I'll sweep campaigns, find root causes, and bring you one plan.",
     });
   },
   startTestAnglesFlow: (product) => {
-    startDiagnostic(set, "test-angles", product, "ang-audit", {
+    startDiagnostic(set, "test-angles", product, "ang-clarify", {
       headline: `Testing new angles · ${product.name}.`,
       intro:
-        "Auditing every creative from the last 30 days first. I want to know what's winning and exactly why — every new angle I draft will build on a real insight, not a guess.",
+        "Three quick questions on the right — they'll constrain what I generate. Confirm and I'll audit creatives, synthesise the pattern, and draft new angles in one go.",
     });
   },
 
@@ -517,9 +517,14 @@ export const useSpotStore = create<PanelState>((set) => ({
           }
           return { ...s.workflow, step: upcoming, approvals };
         }
-        // Diagnostic flows — clear selectedIds when leaving a "picks"
-        // step so the next selectable step starts fresh.
-        return { ...s.workflow, step: upcoming, selectedIds: [] };
+        // Diagnostic flows — when advancing from `plan` to `live`,
+        // flip planApproved so the live canvas knows the user signed
+        // off (drives the dashboard recommendation feed).
+        const planApproved = upcoming.endsWith("-live") ? true : s.workflow.planApproved;
+        // Also reset `ready` on the plan step so the loader shows
+        // before the plan content reveals.
+        const ready = upcoming.endsWith("-plan") ? false : s.workflow.ready;
+        return { ...s.workflow, step: upcoming, planApproved, ready };
       })();
 
       if (tc) {
@@ -553,7 +558,14 @@ export const useSpotStore = create<PanelState>((set) => ({
               };
             });
             const finalThread = intro ? [...updatedThread, intro] : updatedThread;
-            return { thread: finalThread };
+            // Diagnostic plan/live steps gate canvas reveal on `ready`.
+            // When the tool-call resolves we flip ready=true so the
+            // canvas blooms into the plan / live state.
+            const workflow =
+              s2.workflow.kind !== "launch-campaign"
+                ? { ...s2.workflow, ready: true }
+                : s2.workflow;
+            return { thread: finalThread, workflow };
           });
         }, tc.delayMs);
         return { workflow: nextWorkflow, thread: [...s.thread, ...appended] };
@@ -588,18 +600,23 @@ export const useSpotStore = create<PanelState>((set) => ({
       };
     }),
 
-  toggleDiagnosticPick: (id) =>
+  setClarifyAnswer: (questionId, value) =>
     set((s) => {
       if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
-      const current = s.workflow.selectedIds;
-      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
-      return { workflow: { ...s.workflow, selectedIds: next } };
+      return {
+        workflow: {
+          ...s.workflow,
+          clarifyAnswers: { ...s.workflow.clarifyAnswers, [questionId]: value },
+        },
+      };
     }),
 
-  focusProblem: (problemId) =>
+  primeClarifyDefaults: (defaults) =>
     set((s) => {
       if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
-      return { workflow: { ...s.workflow, focusedProblemId: problemId } };
+      // Don't overwrite anything the user has already set — only fill blanks.
+      const merged = { ...defaults, ...s.workflow.clarifyAnswers };
+      return { workflow: { ...s.workflow, clarifyAnswers: merged } };
     }),
 
   attachVoiceAgent: (agentId) =>

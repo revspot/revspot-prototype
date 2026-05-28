@@ -1,831 +1,766 @@
-// Mock content for the three "diagnostic" Spot workflows that sit
-// alongside the launch-campaign flow:
+// Diagnostic Spot workflows — Scale · Optimize · Test New Angles.
 //
-//   1. Scale with Spot   — analyse what's winning, propose scale plays
-//   2. Optimize Campaigns — find losers, root-cause, propose fixes
-//   3. Test New Angles   — audit creatives, synthesise insight, propose
-//                          new angles + an A/B test plan
+// The mental model is "Claude does the heavy lifting, the human approves
+// once". So each workflow has only THREE steps, not four-or-more:
 //
-// Each flow's canvas shows panels of structured analysis; the chat
-// narrates and carries the approval CTAs. The data here is what Spot
-// "found" — in a real product it'd come back from agent calls; here
-// it's static + plausible.
+//   1. clarify  — Spot asks 2-3 quick questions to lock the brief,
+//                 user verifies. On the right pane, a Brief card fills
+//                 in as questions get answered.
+//   2. plan     — Spot autonomously runs the analysis (memory.read +
+//                 personas.fetch + creative.audit + competitor.scan +
+//                 plan.build, all in parallel) and presents ONE plan
+//                 with a time-phased structure (Week 1 / Week 2 / Week
+//                 3, what Spot will do, what it'll observe, the
+//                 decision points and guardrails). User approves once.
+//   3. live     — Plan is running. Canvas shows the active phase, the
+//                 timeline, and recommendations Spot has surfaced for
+//                 human approval (those also feed the dashboard).
+//
+// This file holds:
+//   · Clarifying questions per workflow kind
+//   · Time-phased plan templates per workflow kind
+//   · Pending recommendations Spot surfaces during live execution
+//   · Step ordering + labels + tool-call narration + intro messages
 //
 // All copy is Guyju's-themed (EdTech) so the demo holds together.
 
 import type { SpotMessage } from "./types";
 
 /* ────────────────────────────────────────────────────────────────
- * SCALE WITH SPOT
- *
- * Tells the user: "here's what's working, here's how we scale it
- * without breaking it." Each strategy is concrete + has a projected
- * impact range. Spot is opinionated about which to ship first.
+ * SHARED TYPES
  * ──────────────────────────────────────────────────────────────── */
 
-export type ScaleWinner = {
-  id: string;
-  /** Subject — usually persona × angle or ad-set name. */
+export type ClarifyOption = {
+  /** Stable id used in answers map. */
+  value: string;
+  /** Display label on the chip. */
   label: string;
-  /** Channel + product context. */
-  context: string;
-  metrics: { label: string; value: string; delta?: string; deltaTone?: "good" | "bad" }[];
-  /** Why Spot thinks it's winning. */
-  why: string;
-  /** Headroom — high / medium / low → controls how aggressive scaling can be. */
-  headroom: "high" | "medium" | "low";
-  /** Audience saturation (0-100). Higher = closer to ceiling. */
-  saturation: number;
+  /** Optional one-liner for context (shown on hover or under chip). */
+  hint?: string;
 };
 
-export type ScaleStrategy = {
+export type ClarifyQuestion = {
+  /** Stable id used as the key in the answers map. */
   id: string;
+  /** The question Spot is asking. */
+  question: string;
+  /** Tight one-liner under the question explaining the why. */
+  why?: string;
+  /** Quick-pick options. */
+  options: ClarifyOption[];
+  /** Pre-selected option id. */
+  defaultValue: string;
+  /** Allow a free-text override after a chip is selected. */
+  allowFreeText?: boolean;
+};
+
+export type PlanInsight = {
+  /** Short headline — what Spot found. */
   title: string;
-  /** One-liner shown under the title. */
-  blurb: string;
-  /** Detailed reasoning. */
-  rationale: string;
-  /** Projected impact range. */
-  projectedImpact: string;
-  /** Honest risk / tradeoff. */
-  risk: string;
-  /** Confidence level. */
-  confidence: "high" | "medium" | "low";
-  /** Spot's recommendation strength. */
-  pickFirst?: boolean;
-};
-
-export type ScaleImpactRow = {
-  label: string;
-  current: string;
-  projected: string;
-  delta: string;
-  /** "good" / "bad" — drives colour. */
-  tone: "good" | "bad" | "neutral";
-};
-
-export const SCALE_WINNERS: ScaleWinner[] = [
-  {
-    id: "win-1",
-    label: "Engineer Parent × Mentor-led hook",
-    context: "Meta · Scaling bucket · last 30 days",
-    metrics: [
-      { label: "Spend", value: "₹2.1L" },
-      { label: "Leads", value: "612" },
-      { label: "CPL", value: "₹343", delta: "↓ 22%", deltaTone: "good" },
-      { label: "CPQL", value: "₹2,150", delta: "↓ 14%", deltaTone: "good" },
-      { label: "Qual rate", value: "16.4%", delta: "↑ 4.8pts", deltaTone: "good" },
-    ],
-    why: "Mentor-led framing addresses the parent's actual pain (trust in delivery), not the kid's. Doubt-clearing payoff resonates and the 60-student cap reads as scarce. Lookalike audiences from this cohort show similar early signal.",
-    headroom: "high",
-    saturation: 28,
-  },
-  {
-    id: "win-2",
-    label: "Self-Studier × Doubt-clearing reel",
-    context: "Meta · Scaling bucket · last 30 days",
-    metrics: [
-      { label: "Spend", value: "₹1.3L" },
-      { label: "Leads", value: "548" },
-      { label: "CPL", value: "₹237", delta: "↓ 31%", deltaTone: "good" },
-      { label: "CPQL", value: "₹2,890", delta: "↑ 6%", deltaTone: "bad" },
-      { label: "Qual rate", value: "8.2%", delta: "↓ 1.1pts", deltaTone: "bad" },
-    ],
-    why: "Cheapest cohort to acquire but quality drops on the BOFU funnel. Volume play — useful for top-of-funnel breadth, not a primary BOFU lever.",
-    headroom: "medium",
-    saturation: 52,
-  },
-  {
-    id: "win-3",
-    label: "JEE Crack · Google Search · Brand defense",
-    context: "Google · last 30 days",
-    metrics: [
-      { label: "Spend", value: "₹38K" },
-      { label: "Leads", value: "82" },
-      { label: "CPL", value: "₹463" },
-      { label: "Qual rate", value: "24%", delta: "↑ 2pts", deltaTone: "good" },
-      { label: "Ad strength", value: "Excellent" },
-    ],
-    why: "Brand queries are near-100% intent — defending these is non-negotiable. Currently underspending vs. category — there's room to push.",
-    headroom: "high",
-    saturation: 18,
-  },
-];
-
-export const SCALE_STRATEGIES: ScaleStrategy[] = [
-  {
-    id: "strat-1",
-    title: "Lift budget on winners — controlled 50% rollout",
-    blurb: "+50% spend on the top 2 ad sets, staggered over 3 days.",
-    rationale:
-      "Both top ad sets are under 30% audience saturation — significant headroom. Stagger lets the algorithm re-learn without resetting bid history. We protect CPL by capping each lift step at 20% delta.",
-    projectedImpact: "+ ₹1.4L → ₹1.7L weekly spend · + 280–340 leads · CPL drift +5–10%",
-    risk: "Algorithm re-learning could spike CPL for ~48 hrs before settling. Mitigated by staggered rollout.",
-    confidence: "high",
-    pickFirst: true,
-  },
-  {
-    id: "strat-2",
-    title: "Geo expansion — tier-2 cities (Indore, Lucknow, Coimbatore)",
-    blurb: "Replicate the winning Engineer Parent ad set into 3 new metros.",
-    rationale:
-      "Engineer Parent winner is concentrated in Hyderabad / Pune / Bangalore. Revspot's audience graph shows Indore, Lucknow and Coimbatore have similar JEE-aspirant density with lower CPM. The framing should travel cleanly.",
-    projectedImpact: "+ ₹85K weekly spend · + 220–280 leads · CPL likely 8–15% lower than tier-1",
-    risk: "Tier-2 quality (qual rate) may be lower — track CPQL closely after 7 days.",
-    confidence: "high",
-  },
-  {
-    id: "strat-3",
-    title: "Audience lookalike — 1% LAL on qualified leads",
-    blurb: "Build a 1% lookalike from the 248 qualified-leads cohort.",
-    rationale:
-      "Cohort size now passes Meta's 1,000-seed minimum (248 qualified + 612 verified). LAL on qualified is sharper than the existing LAL on visitors. Expect a quality lift, not necessarily volume.",
-    projectedImpact: "+ 80–120 leads · CPL slightly higher · qual rate +3–5pts",
-    risk: "Smaller addressable pool — best as a complement to budget lift, not standalone scaling.",
-    confidence: "medium",
-  },
-  {
-    id: "strat-4",
-    title: "New placement — extend winners to Stories + Reels Discover",
-    blurb: "Push the top 2 Reels into Stories + Reels Discover placements.",
-    rationale:
-      "Currently running on Feed + Reels feed only. Stories has shown +18% CTR for video Reels in EdTech accounts in Revspot's benchmark set. Reels Discover adds incremental low-CPM reach.",
-    projectedImpact: "+ ₹40K weekly spend · + 110–150 leads · CPM 12–18% lower",
-    risk: "Stories audience skews younger (students) — qualification may dip slightly.",
-    confidence: "medium",
-  },
-];
-
-export const SCALE_IMPACT: ScaleImpactRow[] = [
-  { label: "Weekly spend", current: "₹6.8L", projected: "₹9.4L", delta: "+ 38%", tone: "neutral" },
-  { label: "Weekly leads", current: "1,840", projected: "2,440–2,560", delta: "+ 33–39%", tone: "good" },
-  { label: "Avg CPL", current: "₹349", projected: "₹360–375", delta: "+ 3–7%", tone: "bad" },
-  { label: "Qualified leads", current: "248", projected: "340–380", delta: "+ 37–53%", tone: "good" },
-  { label: "Avg CPQL", current: "₹2,589", projected: "₹2,470–2,650", delta: "± 2%", tone: "good" },
-  { label: "Payback", current: "—", projected: "14–18 days", delta: "first qualified at scale", tone: "neutral" },
-];
-
-/* ────────────────────────────────────────────────────────────────
- * OPTIMIZE CAMPAIGNS
- *
- * "Find the losers · diagnose why · propose the fix." The killer
- * panel here is root-cause: not just "CPL went up" but *why* —
- * creative fatigue, negative sentiment surge, competitor pricing,
- * etc.
- * ──────────────────────────────────────────────────────────────── */
-
-export type ProblemCampaign = {
-  id: string;
-  name: string;
-  context: string;
-  /** "recent-decay" = was good, just broke. "chronic" = never worked. */
-  kind: "recent-decay" | "chronic";
-  severity: "high" | "medium" | "low";
-  metrics: { label: string; value: string; delta?: string; deltaTone?: "good" | "bad" }[];
-  headline: string;
-};
-
-export type RootCause = {
-  id: string;
-  /** Top-line issue. */
-  issue: string;
-  /** Category — drives the icon. */
-  category: "creative-fatigue" | "negative-sentiment" | "audience-saturation" | "competitor" | "attribution" | "pricing" | "landing-page";
-  /** Specific evidence Spot found. */
-  evidence: string[];
-  confidence: "high" | "medium" | "low";
-  /** Which problem campaign this root cause belongs to. */
-  problemId: string;
-};
-
-export type FixPlan = {
-  id: string;
-  /** Short, imperative — "Rotate creative", "Pause and replace…" */
-  action: string;
+  /** Evidence behind the insight. */
   detail: string;
-  /** Which root cause this fix addresses. */
-  addressesRootCauseId: string;
-  /** Effort: small / medium / large. */
-  effort: "small" | "medium" | "large";
-  /** Projected impact. */
-  projectedImpact: string;
-  pickFirst?: boolean;
+  /** Tone drives the colour. */
+  tone: "good" | "warn" | "neutral";
 };
 
-export const PROBLEM_CAMPAIGNS: ProblemCampaign[] = [
-  {
-    id: "prob-1",
-    name: "NEET Pro · TOFU · Parents-see-progress hook",
-    context: "Meta · Lead Gen · launched 32 days ago",
-    kind: "recent-decay",
-    severity: "high",
-    metrics: [
-      { label: "Spend", value: "₹2.96L", delta: "↑ 18%", deltaTone: "bad" },
-      { label: "Leads", value: "484", delta: "↑ 4%", deltaTone: "good" },
-      { label: "CPL", value: "₹612", delta: "↑ 13%", deltaTone: "bad" },
-      { label: "Qual rate", value: "9.5%", delta: "↓ 3.6pts", deltaTone: "bad" },
-    ],
-    headline:
-      "CPL up 13% in 14 days · qualification rate falling · was working at ₹468 CPL for the first 18 days.",
-  },
-  {
-    id: "prob-2",
-    name: "Foundation 9-10 · TOFU · Lab-bench hook",
-    context: "Meta · Lead Gen · launched 64 days ago",
-    kind: "chronic",
-    severity: "medium",
-    metrics: [
-      { label: "Spend", value: "₹1.88L" },
-      { label: "Leads", value: "286" },
-      { label: "CPL", value: "₹657", delta: "vs. ₹420 target", deltaTone: "bad" },
-      { label: "Qual rate", value: "6.6%", delta: "vs. ~12% peer avg", deltaTone: "bad" },
-    ],
-    headline:
-      "Never hit target CPL since launch · qualification rate stuck below product average. Likely positioning issue, not media.",
-  },
-];
+export type PlanPhase = {
+  id: string;
+  /** "Week 1" / "Weeks 1-2" etc. */
+  week: string;
+  /** Date label — Spot computes from "today". */
+  dates: string;
+  /** Phase title. */
+  title: string;
+  /** Bullet list of what Spot will actually do this phase. */
+  actions: string[];
+  /** What Spot watches during this phase to inform the next decision. */
+  observes: string[];
+  /** When Spot will make a call. Null on the final phase. */
+  decisionAt?: string;
+  /** Decision tree branches — "if X, do Y". */
+  decisionRule?: string;
+};
 
-export const ROOT_CAUSES: RootCause[] = [
-  // Problem 1 — recent decay on NEET TOFU
-  {
-    id: "rc-1",
-    problemId: "prob-1",
-    issue: "Creative fatigue · top Reel hit frequency 5.2× · CTR dropped 38%",
-    category: "creative-fatigue",
-    evidence: [
-      "Top Reel ('Parents see weekly progress') was carrying 62% of impressions when launched. CTR was 2.4% on Day 1 → 1.49% by Day 21.",
-      "Frequency on Class-11 parent cohort climbed to 5.2× — well past the 3.5× our benchmarks show as fatigue floor.",
-      "Reach plateaued at 76% of total audience pool size on Day 19. We're now spending against an exhausted audience.",
-    ],
-    confidence: "high",
-  },
-  {
-    id: "rc-2",
-    problemId: "prob-1",
-    issue: "Negative sentiment surge · 14 negative comments in 3 days",
-    category: "negative-sentiment",
-    evidence: [
-      "14 negative comments between May 16-19 on the lead Reel — pattern: viewers calling out 'parent surveillance' framing.",
-      "Comment sentiment dropped from +0.78 (May 1) to −0.18 (May 22). Two comments got 40+ likes — visible at first scroll.",
-      "Comments are skewing the algo against us: Meta's relevance score on this ad dropped from 8/10 → 5/10.",
-    ],
-    confidence: "high",
-  },
-  {
-    id: "rc-3",
-    problemId: "prob-1",
-    issue: "Competitor pricing pressure · Allen dropped NEET pricing ~₹6K",
-    category: "competitor",
-    evidence: [
-      "Click-through to /pricing dropped 41% starting May 12 — same day Allen's offer ad started running heavily in the same metros.",
-      "Allen's Discover ad copy uses 'Pay-on-result' framing — direct attack on our 'No outcome guarantees' positioning.",
-      "Our landing-page bounce rate on /neet/pricing went 22% → 38% over the same window.",
-    ],
-    confidence: "medium",
-  },
-  // Problem 2 — chronic Foundation underperformance
-  {
-    id: "rc-4",
-    problemId: "prob-2",
-    issue: "Hook mismatch · Lab-bench framing reads as 'unserious' to JEE-prep parents",
-    category: "creative-fatigue",
-    evidence: [
-      "Parents commenting 'is this play-school?' on the Lab-bench creative — pattern across 8 of the top 12 comment threads.",
-      "Audience segment that engages: parents of 14-year-olds (target). Audience that *clicks through*: parents of 16+ (out of fit). Mismatch.",
-      "Past learning we missed: 'Avoid pressure-free framing — parents read it as unserious.' Currently in product memory but not reflected in creative brief.",
-    ],
-    confidence: "high",
-  },
-  {
-    id: "rc-5",
-    problemId: "prob-2",
-    issue: "Landing page CTA buried · 'Book demo' below the fold on mobile",
-    category: "landing-page",
-    evidence: [
-      "Mobile heatmap: 71% of visitors don't scroll past the curriculum overview. CTA sits at the 2.4× scroll depth.",
-      "Bounce rate on Foundation pricing page = 64% (vs. JEE Crack equivalent at 38%).",
-      "Average session = 24s on mobile. Not enough time to reach the CTA in current layout.",
-    ],
-    confidence: "high",
-  },
-];
+export type WorkflowPlan = {
+  /** One-line statement of the goal Spot is chasing. */
+  goal: string;
+  /** 3-4 insights from the analysis Spot just ran. */
+  insights: PlanInsight[];
+  /** 3 phases over 2-3 weeks. */
+  phases: PlanPhase[];
+  /** Automatic safety rules Spot enforces without asking. */
+  guardrails: string[];
+  /** When + how Spot will report progress back to the user. */
+  reportingCadence: string;
+};
 
-export const FIX_PLANS: FixPlan[] = [
-  // Fixes for Problem 1 (NEET TOFU decay)
-  {
-    id: "fix-1",
-    addressesRootCauseId: "rc-1",
-    action: "Pause the fatigued Reel · push 2 fresh angles into rotation",
-    detail:
-      "Pause 'Parents see weekly progress' immediately. Brief Creative Agent on 2 net-new hooks (mentor-led + biology-first) — drafts ready in 2 hrs.",
-    effort: "small",
-    projectedImpact: "CPL → ₹495–540 within 7 days · qual rate recovers to ~11.5%",
-    pickFirst: true,
-  },
-  {
-    id: "fix-2",
-    addressesRootCauseId: "rc-2",
-    action: "Re-frame · replace 'parents see' with 'your kid tracks their own progress'",
-    detail:
-      "Swap framing to autonomy-supportive language. Same Reel format, different VO + caption. Removes the surveillance read that triggered negative comments.",
-    effort: "small",
-    projectedImpact: "Sentiment back to +0.4 within 10 days · relevance score 5 → 7+",
-  },
-  {
-    id: "fix-3",
-    addressesRootCauseId: "rc-3",
-    action: "Counter-position · launch '14-day money-back' offer card",
-    detail:
-      "Allen's 'Pay-on-result' is the framing to counter. Lead with refund risk reversal instead. Doesn't undercut their offer — sidesteps it.",
-    effort: "medium",
-    projectedImpact: "Pricing-page bounce 38% → 28% · click-through to checkout +14%",
-  },
-  // Fixes for Problem 2 (Foundation chronic)
-  {
-    id: "fix-4",
-    addressesRootCauseId: "rc-4",
-    action: "Rewrite creative brief · drop lab-bench, lead with 'CBSE-aligned · zero school conflict'",
-    detail:
-      "Pull the Foundation creative brief, fold in the 'Avoid pressure-free framing' constraint from memory. Brief Creative Agent on serious-school-aligned hooks instead.",
-    effort: "medium",
-    projectedImpact: "CPL → ₹510 within 14 days · qual rate to 9-10%",
-    pickFirst: true,
-  },
-  {
-    id: "fix-5",
-    addressesRootCauseId: "rc-5",
-    action: "Move CTA above the fold on /foundation/pricing",
-    detail:
-      "Rewrite the mobile pricing page — sticky 'Book demo' CTA, condensed curriculum to 3 cards, pricing card first. Spec'd in 1 day, build in 2.",
-    effort: "medium",
-    projectedImpact: "Mobile bounce 64% → ~45% · session → 38s · demo-form fills +60%",
-  },
-];
+export type PendingRecommendation = {
+  id: string;
+  /** Which workflow this came from. */
+  sourceKind: "scale" | "optimize" | "test-angles" | "launch-campaign";
+  sourceProduct: string;
+  /** When Spot surfaced it — humanised. */
+  surfacedAt: string;
+  /** Imperative ("Pause X", "Lift budget on Y"). */
+  title: string;
+  /** One-liner detail. */
+  detail: string;
+  /** Evidence Spot is using to justify the rec. */
+  evidence: string[];
+  /** Projected impact if approved. */
+  projectedImpact: string;
+  /** Urgency — drives the dashboard sort + colour. */
+  urgency: "high" | "medium" | "low";
+};
 
 /* ────────────────────────────────────────────────────────────────
- * TEST NEW ANGLES
+ * CLARIFYING QUESTIONS
  *
- * Audits current creative against performance, synthesises *why*
- * winners win, then proposes new angles that build on the insight.
- * Ends with an A/B test plan.
+ * Three questions per workflow kind — enough to constrain Spot's plan
+ * meaningfully without overwhelming the user. Each question pre-picks
+ * the default Spot would have chosen anyway (so the fastest path is
+ * "scroll, confirm, go").
  * ──────────────────────────────────────────────────────────────── */
 
-export type AngleAuditEntry = {
-  id: string;
-  hook: string;
-  /** Persona the angle targets. */
-  personaName: string;
-  /** Channel. */
-  channel: "Meta" | "Google";
-  format: "Static" | "Reel" | "Carousel" | "Search";
-  metrics: { label: string; value: string; tone?: "good" | "bad" }[];
-  /** Why Spot thinks it's winning / losing. */
-  insight: string;
-  /** "winner" / "loser" / "unproven". */
-  verdict: "winner" | "loser" | "unproven";
-};
-
-export type AngleSynthesis = {
-  /** What's working. */
-  working: string[];
-  /** What's not. */
-  notWorking: string[];
-  /** Hypothesis for new angles. */
-  hypothesis: string;
-  /** Constraint Spot is honouring (from product memory). */
-  constraint?: string;
-};
-
-export type ProposedAngle = {
-  id: string;
-  hook: string;
-  cta: string;
-  format: "Static" | "Reel" | "Carousel";
-  personaName: string;
-  /** Which winning insight this builds on. */
-  buildsOn: string;
-  /** Confidence in the angle. */
-  confidence: "high" | "medium" | "low";
-  /** Hue for placeholder gradient. */
-  hue: number;
-};
-
-export type AngleTestPlan = {
-  /** Where the test runs. */
-  testAdSet: string;
-  /** % of cohort traffic allocated to the test. */
-  trafficSplit: number;
-  /** Daily budget. */
-  dailyBudget: string;
-  /** Primary success metric. */
-  successMetric: string;
-  /** Test runtime. */
-  runtime: string;
-  /** What we expect to see. */
-  expectation: string;
-  /** Significance threshold. */
-  significance: string;
-};
-
-export const ANGLE_AUDIT: AngleAuditEntry[] = [
-  // WINNERS
+export const SCALE_QUESTIONS: ClarifyQuestion[] = [
   {
-    id: "aa-1",
-    hook: "Mentor-led classes · capped at 60 students",
-    personaName: "Engineer Parent",
-    channel: "Meta",
-    format: "Static",
-    metrics: [
-      { label: "CTR", value: "2.81%", tone: "good" },
-      { label: "CPL", value: "₹312", tone: "good" },
-      { label: "Qual rate", value: "16.8%", tone: "good" },
-      { label: "Hold rate", value: "—" },
+    id: "goal",
+    question: "What's the primary goal of scaling?",
+    why: "Determines whether I optimise for volume, cost, or audience expansion.",
+    options: [
+      { value: "more-leads", label: "More leads · same quality", hint: "Scale volume on what's already winning" },
+      { value: "lower-cpl", label: "Lower CPL at current volume", hint: "Efficiency before expansion" },
+      { value: "expand-personas", label: "Expand to new personas", hint: "Open new audience layers" },
+      { value: "geo-expand", label: "Expand to new geographies", hint: "Replicate winners in new metros" },
     ],
-    insight:
-      "Specificity ('60', 'mentor-led') over abstract ('small batch'). Concrete numbers signal credibility — parents register the cap as scarce + intentional.",
-    verdict: "winner",
+    defaultValue: "more-leads",
   },
   {
-    id: "aa-2",
-    hook: "Doubt-clearing in 15 minutes · live",
-    personaName: "Self-Studier",
-    channel: "Meta",
-    format: "Reel",
-    metrics: [
-      { label: "CTR", value: "3.42%", tone: "good" },
-      { label: "CPL", value: "₹186", tone: "good" },
-      { label: "Hold rate", value: "62%", tone: "good" },
-      { label: "Qual rate", value: "8.1%", tone: "bad" },
+    id: "budget",
+    question: "Weekly budget headroom?",
+    why: "Caps how aggressive the staged lifts can be.",
+    options: [
+      { value: "2L", label: "Up to ₹2L / week" },
+      { value: "4L", label: "₹2–4L / week" },
+      { value: "8L", label: "₹4–8L / week" },
+      { value: "open", label: "No fixed ceiling" },
     ],
-    insight:
-      "Pain-point hook ('doubt-clearing') + immediate gratification ('15 min'). Brings volume; qualification is lower because intent skews top-of-funnel.",
-    verdict: "winner",
+    defaultValue: "4L",
   },
   {
-    id: "aa-3",
-    hook: "24-month replay · no time pressure",
-    personaName: "Self-Studier",
-    channel: "Meta",
-    format: "Static",
-    metrics: [
-      { label: "CTR", value: "1.94%", tone: "good" },
-      { label: "CPL", value: "₹248" },
-      { label: "Qual rate", value: "11.2%", tone: "good" },
+    id: "guardrails",
+    question: "Any constraints I should respect?",
+    why: "Things I won't touch even if the data suggests I should.",
+    options: [
+      { value: "none", label: "No constraints" },
+      { value: "preserve", label: "Don't touch current best performers" },
+      { value: "conservative", label: "Move slowly · max 25% lift per week" },
+      { value: "weekends", label: "No deploys on weekends" },
     ],
-    insight: "Autonomy framing — student-owned pace. Higher qual rate than the volume-play reel; works on the more deliberate cohort.",
-    verdict: "winner",
-  },
-  // LOSERS
-  {
-    id: "aa-4",
-    hook: "All-India ranked mocks every week",
-    personaName: "Engineer Parent",
-    channel: "Meta",
-    format: "Reel",
-    metrics: [
-      { label: "CTR", value: "0.92%", tone: "bad" },
-      { label: "CPL", value: "₹612", tone: "bad" },
-      { label: "Hold rate", value: "21%", tone: "bad" },
-    ],
-    insight:
-      "Anxiety-framing — parents read 'ranked against 1.2L+' as pressure, not relief. 6 of the top 9 comments express stress. Inverse of what 'mentor-led' triggers.",
-    verdict: "loser",
-  },
-  {
-    id: "aa-5",
-    hook: "Crack JEE — guaranteed strategy",
-    personaName: "Engineer Parent",
-    channel: "Meta",
-    format: "Static",
-    metrics: [
-      { label: "CTR", value: "1.18%" },
-      { label: "CPL", value: "₹584", tone: "bad" },
-      { label: "Qual rate", value: "3.4%", tone: "bad" },
-    ],
-    insight:
-      "Reads as bait. The 'guaranteed' frame triggers skepticism — engineer-parents are precisely the cohort least likely to believe outcome guarantees. Flagged in product memory.",
-    verdict: "loser",
-  },
-  // UNPROVEN
-  {
-    id: "aa-6",
-    hook: "Watch a sample class for free",
-    personaName: "Coaching Hopper",
-    channel: "Meta",
-    format: "Reel",
-    metrics: [
-      { label: "Spend", value: "₹14K" },
-      { label: "Leads", value: "32" },
-      { label: "CPL", value: "₹438" },
-    ],
-    insight: "Launched 6 days ago. Not enough data to call yet — early signal is positive (CPL trending below target).",
-    verdict: "unproven",
+    defaultValue: "preserve",
   },
 ];
 
-export const ANGLE_SYNTHESIS: AngleSynthesis = {
-  working: [
-    "Specificity beats abstraction · '60-student cap' wins, 'small batch' doesn't",
-    "Autonomy-supportive framing · 'student-owned pace', 'kid tracks progress'",
-    "Pain-relief over outcome-promise · 'doubt-clearing in 15 min' over 'crack JEE'",
-    "Authority signals · 'IIT-alum mentors' adds trust without sounding boastful",
-  ],
-  notWorking: [
-    "Anxiety / pressure framing · ranking, competing, 'against 1.2L+ aspirants'",
-    "Outcome guarantees · triggers skepticism, flagged in memory anyway",
-    "Comparison to competitors by name · 'better than Allen' — feels insecure",
-    "Surveillance framing on parents · 'parents see' read as helicopter-parenting",
-  ],
-  hypothesis:
-    "Lean into 'your kid's own journey' — specific, autonomy-supportive, pain-relieving. Pair with concrete credibility signals (numbers, alumni). Drop ranking + outcome-guarantee framing entirely.",
-  constraint:
-    "From memory · don't promise specific ranks / outcomes (legal flagged) and avoid name-checking competitors.",
-};
-
-export const PROPOSED_ANGLES: ProposedAngle[] = [
+export const OPTIMIZE_QUESTIONS: ClarifyQuestion[] = [
   {
-    id: "pa-1",
-    hook: "Your kid's own progress graph · updated every Friday",
-    cta: "See a sample dashboard",
-    format: "Reel",
-    personaName: "Engineer Parent",
-    buildsOn: "Specificity + autonomy framing",
-    confidence: "high",
-    hue: 215,
+    id: "priority",
+    question: "What's the priority?",
+    why: "Determines what I fix first when multiple issues compete.",
+    options: [
+      { value: "cpl", label: "Bring CPL down", hint: "Pause fatigued creative · counter-position on pricing" },
+      { value: "quality", label: "Improve lead quality", hint: "Refine targeting · fix qualification rate" },
+      { value: "fix-decay", label: "Stop the recent decay", hint: "Restore what was working two weeks ago" },
+      { value: "everything", label: "Fix all of it · I'll pick" },
+    ],
+    defaultValue: "fix-decay",
   },
   {
-    id: "pa-2",
-    hook: "Mentor 1:1 every fortnight · finally heard, not just taught",
-    cta: "Meet the mentors",
-    format: "Carousel",
-    personaName: "Engineer Parent",
-    buildsOn: "Authority + autonomy (heard, not lectured)",
-    confidence: "high",
-    hue: 32,
+    id: "scope",
+    question: "Which campaigns are in scope?",
+    why: "I can scope this to recent decay only, or include chronic losers too.",
+    options: [
+      { value: "decay", label: "Recent decay only" },
+      { value: "chronic", label: "Chronic losers only" },
+      { value: "both", label: "Both — full sweep" },
+    ],
+    defaultValue: "both",
   },
   {
-    id: "pa-3",
-    hook: "Stuck on a doubt at 11pm? Live mentor on call.",
-    cta: "Try a free doubt-clearing session",
-    format: "Reel",
-    personaName: "Self-Studier",
-    buildsOn: "Pain-relief framing + specificity (11pm)",
-    confidence: "high",
-    hue: 145,
-  },
-  {
-    id: "pa-4",
-    hook: "Recordings stay live for 24 months · pause life, not learning",
-    cta: "Tour the library",
-    format: "Static",
-    personaName: "Self-Studier",
-    buildsOn: "Autonomy-supportive · pain-relief (life conflicts)",
-    confidence: "medium",
-    hue: 290,
-  },
-  {
-    id: "pa-5",
-    hook: "Switching coaching mid-year? Bring your old syllabus — we cover the gap.",
-    cta: "Book a 1:1 transition call",
-    format: "Static",
-    personaName: "Coaching Hopper",
-    buildsOn: "Pain-relief + specific scenario (mid-year switch)",
-    confidence: "medium",
-    hue: 12,
-  },
-  {
-    id: "pa-6",
-    hook: "Class size: 60 · screen size: yours · stakes: the same.",
-    cta: "Watch a class",
-    format: "Reel",
-    personaName: "Engineer Parent",
-    buildsOn: "Specificity + reframing (online = serious)",
-    confidence: "medium",
-    hue: 180,
+    id: "autonomy",
+    question: "How autonomous should I be?",
+    why: "Some fixes are reversible (creative rotation); some aren't (landing page rebuild).",
+    options: [
+      { value: "ship-small", label: "Auto-ship small · ask before big", hint: "Recommended" },
+      { value: "ask-everything", label: "Ask before every change" },
+      { value: "ship-all", label: "Ship everything · within guardrails" },
+    ],
+    defaultValue: "ship-small",
   },
 ];
 
-export const ANGLE_TEST_PLAN: AngleTestPlan = {
-  testAdSet: "Engineer Parent · Class 11/12 parents · tier-1 metros",
-  trafficSplit: 30,
-  dailyBudget: "₹4,000/day",
-  successMetric: "CPL ≤ ₹360 with qual rate ≥ 14% over a 7-day window",
-  runtime: "10 days · early-stop guard if frequency > 4×",
-  expectation:
-    "Top 2 of the 6 angles should clear the threshold. Spot will pause the rest after the 7-day mark and roll the winners into the Scaling bucket.",
-  significance:
-    "We'll need ≥ 180 leads per angle for a directional read · the 10-day window + traffic split is sized to hit that on the top 2.",
-};
+export const ANGLES_QUESTIONS: ClarifyQuestion[] = [
+  {
+    id: "focus",
+    question: "Which persona should I focus angles on?",
+    why: "Different personas need different framing — better to pick than spray.",
+    options: [
+      { value: "engineer-parent", label: "The Aspiring Engineer Parent" },
+      { value: "self-studier", label: "The Self-Studier" },
+      { value: "coaching-hopper", label: "The Coaching Hopper" },
+      { value: "all", label: "All three · cross-cutting test" },
+    ],
+    defaultValue: "engineer-parent",
+  },
+  {
+    id: "format",
+    question: "Which creative formats?",
+    why: "Drives what I'll brief the Creative Agent on.",
+    options: [
+      { value: "video", label: "Video / Reels only" },
+      { value: "static", label: "Static + Carousel only" },
+      { value: "mixed", label: "Mix · video + static" },
+    ],
+    defaultValue: "mixed",
+  },
+  {
+    id: "test-spend",
+    question: "How much weekly spend on the A/B test?",
+    why: "Determines how fast we'll get a directional read.",
+    options: [
+      { value: "low", label: "₹20K / week", hint: "Slower · 14-day signal" },
+      { value: "med", label: "₹40K / week", hint: "Recommended · 10-day signal" },
+      { value: "high", label: "₹80K / week", hint: "Fast · 7-day signal" },
+    ],
+    defaultValue: "med",
+  },
+];
+
+/** Convenience lookup. */
+export function clarifyQuestionsFor(
+  kind: "scale" | "optimize" | "test-angles",
+): ClarifyQuestion[] {
+  if (kind === "scale") return SCALE_QUESTIONS;
+  if (kind === "optimize") return OPTIMIZE_QUESTIONS;
+  return ANGLES_QUESTIONS;
+}
+
+/** Render a captured answer (for the verification card). */
+export function answerLabel(
+  kind: "scale" | "optimize" | "test-angles",
+  questionId: string,
+  value: string,
+): string {
+  const q = clarifyQuestionsFor(kind).find((q) => q.id === questionId);
+  return q?.options.find((o) => o.value === value)?.label ?? value;
+}
 
 /* ────────────────────────────────────────────────────────────────
- * Intro messages — one per step for each new flow. Pattern matches
- * the existing stepIntroMessage() in workflow.ts.
+ * TIME-PHASED PLANS
+ *
+ * One plan per workflow kind. The "element of time" the user asked for
+ * is the explicit Week 1 / Week 2 / Week 3 structure — Spot doesn't
+ * just say "ship the fix", it commits to a watching window and a
+ * decision date.
+ *
+ * Dates are illustrative — in a real product Spot would compute them
+ * relative to "today" (workflow.startedAt).
+ * ──────────────────────────────────────────────────────────────── */
+
+export const SCALE_PLAN: WorkflowPlan = {
+  goal:
+    "Grow qualified-lead volume 35–45% over 3 weeks while keeping CPL drift under 10%.",
+  insights: [
+    {
+      title: "Two winning ad sets have real headroom",
+      detail:
+        "Engineer Parent × Mentor-led hook and Self-Studier × Doubt-clearing reel are sitting at 28% and 52% saturation respectively — significant room before reach plateaus.",
+      tone: "good",
+    },
+    {
+      title: "1% LAL seed cohort just crossed the threshold",
+      detail:
+        "Qualified-lead cohort hit 248 (Meta needs 1k seed; our verified+qualified pool is 860). Sharper LAL than the one currently running on visitors.",
+      tone: "good",
+    },
+    {
+      title: "Brand Search is severely underspent",
+      detail:
+        "₹38K against ₹98K total Google spend — defending brand queries at ~100% intent, but we're losing ~31% of branded impressions to category bidders.",
+      tone: "warn",
+    },
+    {
+      title: "Stories placement untouched on winning Reels",
+      detail:
+        "Top 2 Reels run on Feed only. Workspace benchmarks show +18% CTR on Stories for video-led EdTech creative.",
+      tone: "neutral",
+    },
+  ],
+  phases: [
+    {
+      id: "p1",
+      week: "Week 1",
+      dates: "May 28 – Jun 3",
+      title: "Stage 1 lift · build the LAL seed",
+      actions: [
+        "Lift budget +25% on Engineer Parent × Mentor-led hook (staggered over 3 days)",
+        "Lift budget +25% on Self-Studier × Doubt-clearing reel",
+        "Brief the LAL audience from the 860-strong verified+qualified cohort",
+        "Open Brand Search defense budget cap by 2.4× (₹38K → ₹92K)",
+      ],
+      observes: [
+        "CPL drift on lifted ad sets · expecting ≤ 8%",
+        "Frequency on the top Reel · cap at 4×",
+        "Brand Search impression share recovery",
+      ],
+      decisionAt: "Day 4 · Jun 1",
+      decisionRule:
+        "If CPL drift ≤ 8% on both ad sets → fire Stage 2. If drift 8–12% → hold one more day. If > 12% → auto-pause that ad set.",
+    },
+    {
+      id: "p2",
+      week: "Week 2",
+      dates: "Jun 4 – Jun 10",
+      title: "Decide · launch LAL · expand placements",
+      actions: [
+        "If Stage 1 holds, fire Stage 2 lift (+25% more, compounds to +50% total)",
+        "Launch the new 1% LAL audience inside the Scaling bucket",
+        "Open Stories + Reels Discover placements on the top 2 winning Reels",
+        "Continue Brand Search defense at the new budget cap",
+      ],
+      observes: [
+        "LAL audience CPL vs. core (target: within 15%)",
+        "Stories placement CTR vs. Feed",
+        "Qualified-lead trajectory (the actual goal, not CPL)",
+      ],
+      decisionAt: "Day 11 · Jun 8",
+      decisionRule:
+        "If qualified-lead delta ≥ +25% vs baseline → green-light Week 3 geo expansion. Else hold + audit before expanding.",
+    },
+    {
+      id: "p3",
+      week: "Week 3",
+      dates: "Jun 11 – Jun 17",
+      title: "Scale winners · prune losers · expand geo",
+      actions: [
+        "Geo expand the winning Engineer Parent ad set to Indore + Lucknow + Coimbatore",
+        "Pause any placement still underperforming benchmark after 10 days",
+        "Move the LAL audience into its own scaling bucket if it's pulling ≥ 80% of core CPL",
+        "Post final report-back to the dashboard · I'll write the learnings to product memory",
+      ],
+      observes: [
+        "Tier-2 CPL vs. tier-1 baseline (expect 8–15% lower)",
+        "End-of-window CPQL · the actual scaling KPI",
+        "Whether the LAL is sharper than visitor LAL we used to run",
+      ],
+    },
+  ],
+  guardrails: [
+    "If CPL drift exceeds 15% on any lift stage, auto-pause that stage and ping you immediately",
+    "If frequency hits 4.5× on a winning ad, rotate creative without waiting for permission",
+    "If qualified-lead rate drops more than 3 points, pause the affected ad set",
+    "Never push more than one major change on a weekend",
+  ],
+  reportingCadence:
+    "I'll drop a short check-in on your dashboard every Monday morning, plus a flag the moment any guardrail fires. End of Week 3 I'll write a learnings entry into product memory.",
+};
+
+export const OPTIMIZE_PLAN: WorkflowPlan = {
+  goal:
+    "Restore NEET TOFU CPL from ₹612 back to the ₹468 it was at three weeks ago · fix Foundation chronic underperformance in parallel.",
+  insights: [
+    {
+      title: "Top NEET Reel is fatigued · 5.2× frequency",
+      detail:
+        "CTR fell from 2.4% → 1.49% over 21 days. Reach plateaued at 76% of pool size on Day 19. We're spending against an exhausted audience.",
+      tone: "warn",
+    },
+    {
+      title: "Negative sentiment spike on Day 18",
+      detail:
+        "14 negative comments in 3 days flagged the 'Parents see weekly progress' hook as 'surveillance framing'. Sentiment dropped from +0.78 → −0.18. Meta's relevance score on the ad dropped 8 → 5.",
+      tone: "warn",
+    },
+    {
+      title: "Allen launched ₹6K NEET price drop on May 12",
+      detail:
+        "Our /pricing click-through dropped 41% same day. Their 'Pay-on-result' framing is a direct attack on our 'No outcome guarantees' positioning — needs a counter.",
+      tone: "warn",
+    },
+    {
+      title: "Foundation is a positioning issue, not a media issue",
+      detail:
+        "Lab-bench hook reads as 'play-school' to JEE-prep parents. Memory already has the constraint ('Avoid pressure-free framing') — Creative Agent missed it on the brief.",
+      tone: "neutral",
+    },
+  ],
+  phases: [
+    {
+      id: "p1",
+      week: "Week 1",
+      dates: "May 28 – Jun 3",
+      title: "Ship the small fixes · rewrite the Foundation brief",
+      actions: [
+        "Pause the fatigued 'Parents see weekly progress' Reel immediately",
+        "Brief Creative Agent on 2 new NEET hooks: mentor-led + biology-first",
+        "Re-frame: replace 'parents see' with 'your kid tracks their own progress'",
+        "Rewrite the Foundation creative brief · enforce the memory constraint",
+      ],
+      observes: [
+        "NEET TOFU CPL trajectory · expect recovery to ₹520-540 by Day 6",
+        "Comment sentiment on the new Reels (target: back above +0.4)",
+        "New Foundation creative briefs · approved by the QA Agent",
+      ],
+      decisionAt: "Day 5 · Jun 2",
+      decisionRule:
+        "If sentiment recovers and CPL trending down → continue Week 2. If sentiment stays negative → escalate, pull all NEET TOFU spend pending creative review.",
+    },
+    {
+      id: "p2",
+      week: "Week 2",
+      dates: "Jun 4 – Jun 10",
+      title: "Counter-position on price · rebuild Foundation page",
+      actions: [
+        "Launch the '14-day money-back' offer card on NEET pricing page",
+        "Push 4 new Foundation creatives based on the rewritten brief",
+        "Ticket the Foundation landing-page rebuild · sticky mobile CTA above the fold",
+        "Run a side-by-side A/B on NEET hook framing (autonomy vs. trust)",
+      ],
+      observes: [
+        "NEET /pricing bounce rate · expect 38% → ~28%",
+        "Foundation CPL drift (chronic issue · expect 8-15% improvement)",
+        "Mobile session length on the new Foundation page",
+      ],
+      decisionAt: "Day 10 · Jun 7",
+      decisionRule:
+        "If NEET CPL ≤ ₹510 and Foundation CPL trending down → declare both recovered, move into watch mode. Else triage what's still broken.",
+    },
+    {
+      id: "p3",
+      week: "Week 3",
+      dates: "Jun 11 – Jun 17",
+      title: "Watch mode · write learnings to memory",
+      actions: [
+        "Hold all changes · just watch trajectories",
+        "If recovery holds, freeze new creative + new positioning into the locked brief",
+        "Write 3 learnings to product memory: creative fatigue threshold, counter-positioning template, Foundation positioning constraint",
+        "Schedule auto-flag for next decay event · 14-day rolling check on frequency + sentiment",
+      ],
+      observes: [
+        "Whether CPL stays in band without new interventions",
+        "Whether the Foundation positioning fix actually moved qual rate",
+        "Allen's pricing — does our counter-position close the gap?",
+      ],
+    },
+  ],
+  guardrails: [
+    "If NEET CPL spikes above ₹700 on any single day, pause TOFU spend until I diagnose",
+    "If a new creative gets 3+ negative comments in 24 hours, auto-pause it pending review",
+    "If Allen drops price again, escalate immediately rather than reacting alone",
+    "No landing-page changes ship to prod without your sign-off — only briefs and tickets",
+  ],
+  reportingCadence:
+    "Daily CPL ping on the dashboard for the first 5 days, then weekly. Any guardrail fire = immediate notification. End of Week 3 = full retro entry into product memory.",
+};
+
+export const ANGLES_PLAN: WorkflowPlan = {
+  goal:
+    "Identify 2 new winning angles for Engineer Parent that beat the current best (CPL ₹312, qual rate 16.8%) — without losing the wins we already have.",
+  insights: [
+    {
+      title: "Winners share a pattern: specificity + autonomy",
+      detail:
+        "'Mentor-led · capped at 60' and '24-month replay · no time pressure' both lean specific + student-owned. Abstract or pressure framings lost.",
+      tone: "good",
+    },
+    {
+      title: "Losers share a pattern too: anxiety + outcome promises",
+      detail:
+        "'All-India ranked mocks weekly' and 'Crack JEE — guaranteed strategy' both lost on CTR and CPL. Comment data shows parents read them as pressure.",
+      tone: "warn",
+    },
+    {
+      title: "Memory constraint must guide generation",
+      detail:
+        "Product memory flags: no rank promises (legal), no name-checking competitors. The hypothesis we're testing respects both.",
+      tone: "neutral",
+    },
+    {
+      title: "Engineer Parent ad set is the right host",
+      detail:
+        "Highest volume of the three personas → fastest signal. 30% traffic split gives us ~180 leads per angle in 10 days — directionally significant on the top 2.",
+      tone: "good",
+    },
+  ],
+  phases: [
+    {
+      id: "p1",
+      week: "Week 1",
+      dates: "May 28 – Jun 3",
+      title: "Launch the 6-angle A/B test",
+      actions: [
+        "Push 6 new angles into the Engineer Parent scaling ad set · ₹40K/week budget",
+        "30% traffic split to the test · 70% continues on current winners",
+        "Run a 7-day early-stop guard · pause any angle with CTR < 0.8% or freq > 4×",
+        "Daily watchlist: CPL per angle, hold-rate, comment sentiment",
+      ],
+      observes: [
+        "Which 2-3 angles clear the CPL ≤ ₹360 threshold",
+        "Whether qual rate stays ≥ 14% on the leading angles",
+        "Comment sentiment on each angle — early signal for memory updates",
+      ],
+      decisionAt: "Day 7 · Jun 4",
+      decisionRule:
+        "If 2+ angles clear threshold → continue Week 2 with those. If only 1 clears → extend test with that one + 2 fresh variants. If 0 clear → pull, audit, restart with new hypothesis.",
+    },
+    {
+      id: "p2",
+      week: "Week 2",
+      dates: "Jun 4 – Jun 10",
+      title: "Lock winners · prune losers",
+      actions: [
+        "Pause all angles that didn't clear threshold (typically 3-4 of the 6)",
+        "Double traffic share on the top 2 angles (60% of test budget each)",
+        "Brief Resize Agent on the variants needed for full deployment",
+        "Run a sentiment audit on the comment sections weekly",
+      ],
+      observes: [
+        "CPL trajectory of the winners as they scale",
+        "Whether they hold qual rate when budget shifts toward them",
+        "How they're performing across the full audience (not just the test cohort)",
+      ],
+      decisionAt: "Day 11 · Jun 8",
+      decisionRule:
+        "If winners hold CPL ≤ ₹360 under doubled share → move them into the main Scaling bucket. Else they were narrow wins; iterate.",
+    },
+    {
+      id: "p3",
+      week: "Week 3",
+      dates: "Jun 11 – Jun 17",
+      title: "Promote winners to the main rotation · write learnings",
+      actions: [
+        "Move winning angles out of the test and into the primary Scaling bucket",
+        "Retire the angles they displaced (the previous winners get demoted to retargeting)",
+        "Write the angle-pattern insight to product memory (specificity + autonomy)",
+        "Brief next angle generation cycle using the validated pattern",
+      ],
+      observes: [
+        "Final lift in qualified-lead volume from the new winners",
+        "Whether the demoted-but-not-paused old winners still hold in retargeting",
+        "What the pattern says about the next testing cycle",
+      ],
+    },
+  ],
+  guardrails: [
+    "Any angle that gets 5+ negative comments in 48 hours gets auto-paused pending review",
+    "If overall ad-set CPL drifts > 12% during the test, throttle test budget",
+    "Never let the test eat more than 30% of the host ad set's traffic",
+    "All new copy passes through the 'avoid' list from product memory before going live",
+  ],
+  reportingCadence:
+    "Mid-test check-in on the dashboard at Day 4. Full result + winner declaration at Day 10. Learnings update to memory on Day 14.",
+};
+
+export function planFor(kind: "scale" | "optimize" | "test-angles"): WorkflowPlan {
+  if (kind === "scale") return SCALE_PLAN;
+  if (kind === "optimize") return OPTIMIZE_PLAN;
+  return ANGLES_PLAN;
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * RECOMMENDATIONS FED TO THE DASHBOARD
+ *
+ * These are the things Spot has surfaced from active plans that need
+ * a human approval. The dashboard renders a feed; clicking Approve
+ * dismisses + pretends to deploy. Each recommendation carries enough
+ * evidence that the user can decide in 5 seconds.
+ * ──────────────────────────────────────────────────────────────── */
+
+export const PENDING_RECOMMENDATIONS: PendingRecommendation[] = [
+  {
+    id: "rec-1",
+    sourceKind: "optimize",
+    sourceProduct: "Guyju's NEET Pro",
+    surfacedAt: "12 min ago",
+    title: "Pause 'Parents see weekly progress' Reel",
+    detail:
+      "Frequency hit 5.2× this morning · CTR is now below the threshold I set on Day 1. Negative comments are stacking on top.",
+    evidence: [
+      "Frequency 5.2× (cap: 4×)",
+      "CTR fell to 1.42% (Day 1: 2.4%)",
+      "5 new negative comments in last 18 hrs",
+    ],
+    projectedImpact: "CPL recovers to ₹530-545 within 48 hrs · sentiment back above zero in 10 days",
+    urgency: "high",
+  },
+  {
+    id: "rec-2",
+    sourceKind: "scale",
+    sourceProduct: "Guyju's JEE Crack",
+    surfacedAt: "2 hr ago",
+    title: "Fire Stage 2 budget lift on Engineer Parent",
+    detail:
+      "Stage 1 held — CPL drift is +6.4%, well under the 8% threshold. Ready to compound to +50% total lift.",
+    evidence: [
+      "Stage 1 CPL drift: +6.4% (limit: 8%)",
+      "Frequency on top creative: 3.1× (under cap)",
+      "Qualified-lead rate stable at 14.2%",
+    ],
+    projectedImpact: "+ ₹85K weekly spend · + 140-170 weekly leads · CPL drifts to +9-11% total",
+    urgency: "medium",
+  },
+  {
+    id: "rec-3",
+    sourceKind: "test-angles",
+    sourceProduct: "Guyju's JEE Crack",
+    surfacedAt: "4 hr ago",
+    title: "Promote 2 winning angles to Scaling bucket",
+    detail:
+      "'Your kid tracks their own progress' and 'Live mentor at 11pm' both cleared the threshold with room. Day 7 early-stop fired.",
+    evidence: [
+      "Angle 1 CPL: ₹298 (target: ≤ ₹360)",
+      "Angle 2 CPL: ₹324",
+      "Both holding qual rate ≥ 15.8%",
+    ],
+    projectedImpact: "Replaces 2 demoted angles · lifts portfolio CPL by ~6%",
+    urgency: "medium",
+  },
+  {
+    id: "rec-4",
+    sourceKind: "optimize",
+    sourceProduct: "Guyju's Foundation 9-10",
+    surfacedAt: "yesterday",
+    title: "Ticket the Foundation pricing page rebuild",
+    detail:
+      "Mobile CTA is below the fold · 71% of visitors don't reach it. Spec is ready · just needs 2 days of dev.",
+    evidence: [
+      "Mobile bounce rate: 64%",
+      "Avg session: 24s on mobile",
+      "Heatmap shows CTA at 2.4× scroll depth",
+    ],
+    projectedImpact: "Mobile bounce 64% → ~45% · demo form fills +60%",
+    urgency: "low",
+  },
+];
+
+/* ────────────────────────────────────────────────────────────────
+ * INTRO MESSAGES + TOOL CALLS
+ *
+ * The new 3-step model maps to:
+ *   clarify  → tool-call: "spot.brief"     (fast, just confirms)
+ *   plan     → tool-calls: 5 parallel agents (memory, personas,
+ *              creative.audit, competitor.scan, plan.build)
+ *   live     → tool-call: "deploy.push"
  * ──────────────────────────────────────────────────────────────── */
 
 export function extendedIntroMessage(
   step: string,
   productName: string,
+  kind: "scale" | "optimize" | "test-angles" = "scale",
 ): SpotMessage | null {
   switch (step) {
-    /* ─── Scale ─── */
-    case "scale-analyze":
+    /* ─── clarify (per kind) ───────────────────────────────────── */
+    case "scale-clarify":
       return {
         role: "spot",
         parts: [
           {
             type: "text",
-            text: `Pulled the last 30 days for **${productName}**. Three things are clearly winning — right pane has the breakdown plus the headroom estimate per winner.`,
+            text: `Quick context before I run the full analysis on **${productName}**. Three questions on the right — I've pre-picked sensible defaults, so confirm or change.`,
           },
           {
             type: "step-cta",
-            label: "Show me how to scale them",
-            helper: "I'll propose 4 plays — pick the ones to ship.",
+            label: "Confirm · run analysis",
+            helper: "I'll work for 30-40 seconds, then present a single plan to approve.",
+            refineHint: "or change the picks on the right",
           },
         ],
       };
-    case "scale-strategies":
+    case "opt-clarify":
       return {
         role: "spot",
         parts: [
           {
             type: "text",
-            text: "Four strategies on the right. I'd pick the budget lift first — it's the highest-confidence play and we've got 70% headroom on the two top ad sets. Lookalike and Stories placement are good complements once the lift is stable.",
+            text: `Quick context before I dig in on **${productName}**. Three questions on the right.`,
           },
           {
             type: "step-cta",
-            label: "Approve picks — preview impact",
-            helper: "I'll project leads, spend, CPL over the next 30 days.",
-            refineHint: "or tell me which strategies to drop",
+            label: "Confirm · run diagnostic",
+            helper: "I'll sweep campaigns, find root causes, and build a 3-week fix plan.",
+            refineHint: "or change the picks on the right",
           },
         ],
       };
-    case "scale-impact":
+    case "ang-clarify":
       return {
         role: "spot",
         parts: [
           {
             type: "text",
-            text: "Here's what the picked strategies project. CPL drifts up slightly (+3-7%), but qualified-lead volume jumps 37–53%. CPQL stays roughly flat — that's the read we want before pushing more budget.",
+            text: `Quick context before I audit creatives on **${productName}**. Three questions on the right — these constrain what I'll generate.`,
           },
           {
             type: "step-cta",
-            label: "Looks good — deploy",
-            helper: "I'll stage the budget lifts and launch the LAL audience.",
-            refineHint: "or tell me to be more conservative",
-          },
-        ],
-      };
-    case "scale-deploy":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: "Final review — every change I'll make is on the right. I'll stagger the budget lifts over 3 days, launch the LAL on Day 2, and add the new placements on Day 4.",
-          },
-          {
-            type: "step-cta",
-            label: "Ship it",
-            helper: "Changes go live on Meta and Google immediately.",
+            label: "Confirm · run creative audit",
+            helper: "I'll audit, synthesise the pattern, and propose new angles in one pass.",
+            refineHint: "or change the picks on the right",
           },
         ],
       };
 
-    /* ─── Optimize ─── */
-    case "opt-diagnose":
+    /* ─── plan ────────────────────────────────────────────────── */
+    case "scale-plan":
+    case "opt-plan":
+    case "ang-plan": {
+      const intro =
+        kind === "scale"
+          ? "Plan's ready · 3 phases over 3 weeks. The actions for Week 1 are concrete; the later phases adapt based on what I observe. Guardrails are listed at the bottom — I enforce them without asking."
+          : kind === "optimize"
+            ? "Plan's ready · 3 phases over 3 weeks. Week 1 ships the small reversible fixes. Week 2 is the bigger swings. Week 3 is watch-mode + writing learnings to memory."
+            : "Plan's ready · 3 phases over ~17 days. Week 1 launches the 6-angle test. Week 2 prunes and doubles down. Week 3 promotes winners + writes the pattern to memory.";
       return {
         role: "spot",
         parts: [
-          {
-            type: "text",
-            text: `Two campaigns flagged across **${productName}**. One was working and just broke; the other has never hit target. Different stories, different fixes — right pane shows both.`,
-          },
+          { type: "text", text: intro },
           {
             type: "step-cta",
-            label: "Drill into the root cause",
-            helper: "I'll show what I found per campaign.",
+            label: "Approve plan · kick off Week 1",
+            helper:
+              "Once approved, I'll execute Week 1 today and ping your dashboard at every decision point.",
+            refineHint: "or tell me what to change before I start",
           },
         ],
       };
-    case "opt-root-cause":
+    }
+
+    /* ─── live ────────────────────────────────────────────────── */
+    case "scale-live":
+    case "opt-live":
+    case "ang-live":
       return {
         role: "spot",
         parts: [
           {
-            type: "text",
-            text: "Three things going wrong on NEET TOFU at the same time — creative fatigue, a negative-comment spike on the Reel, and Allen dropping their NEET price last week. The Foundation chronic issue is simpler: hook mismatch + a buried CTA on mobile.",
+            type: "headline",
+            text: `Plan live for ${productName}.`,
+            verdict: "ok",
           },
-          {
-            type: "step-cta",
-            label: "Show me the fix plan",
-            helper: "I'll propose one fix per root cause.",
-          },
-        ],
-      };
-    case "opt-fix-plan":
-      return {
-        role: "spot",
-        parts: [
           {
             type: "text",
-            text: "Five fixes total — three for NEET, two for Foundation. I'd ship the creative rotation first (smallest effort, biggest immediate effect) and the Foundation creative-brief rewrite second. Counter-positioning on Allen's price drop is the slow burn — worth doing but not urgent.",
-          },
-          {
-            type: "step-cta",
-            label: "Approve picks — preview deploy",
-            helper: "I'll show the exact changes before applying.",
-            refineHint: "or tell me which fixes to drop",
-          },
-        ],
-      };
-    case "opt-deploy":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: "Final review on the right. Once you ship, the fatigued Reel pauses immediately, the new creative briefs go to Creative Agent in parallel, and the Foundation pricing page goes into the next dev sprint.",
-          },
-          {
-            type: "step-cta",
-            label: "Ship the fixes",
-            helper: "I'll watch CPL daily and flag if anything regresses.",
+            text: "Week 1 actions are running. You'll see me ping your dashboard at the next decision date with what to approve. Anything I need *before* that, I'll surface here.",
           },
         ],
       };
 
-    /* ─── Test new angles ─── */
-    case "ang-audit":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: `Audited every creative running on **${productName}** in the last 30 days. Three clear winners, two clear losers, one too early to call. Right pane has the breakdown with the insight per angle.`,
-          },
-          {
-            type: "step-cta",
-            label: "What's the pattern?",
-            helper: "I'll synthesise what's making winners win.",
-          },
-        ],
-      };
-    case "ang-insights":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: "Pattern's pretty clean — specificity + autonomy framing wins, anxiety + outcome-guarantee framing loses. The hypothesis I'm building from: 'your kid's own journey' beats 'beat the competition'. Memory's constraint (no rank promises, no name-checking competitors) reinforces it.",
-          },
-          {
-            type: "step-cta",
-            label: "Generate new angles",
-            helper: "I'll draft 6 — each tied to a specific winning insight.",
-          },
-        ],
-      };
-    case "ang-generate":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: "Six new angles drafted on the right. Each one is grounded in a specific insight from the audit — hover any card to see which winner it builds on. I'd ship 4 of these into the A/B test; the other 2 are second-priority.",
-          },
-          {
-            type: "step-cta",
-            label: "Approve angles — plan the test",
-            helper: "I'll set up the A/B test next.",
-            refineHint: "or tell me which to swap",
-          },
-        ],
-      };
-    case "ang-test-plan":
-      return {
-        role: "spot",
-        parts: [
-          {
-            type: "text",
-            text: "A/B plan on the right. We'll run the test on the Engineer Parent scaling ad set (highest volume, fastest data), 30% traffic split, ~₹4K/day. Sized to give us a directional read on the top 2 angles in 10 days.",
-          },
-          {
-            type: "step-cta",
-            label: "Launch the test",
-            helper: "I'll push the angles to Meta and watch.",
-          },
-        ],
-      };
-
-    /* ─── Shared done ─── */
+    /* ─── done (terminal, shared) ─────────────────────────────── */
     case "done":
       return {
         role: "spot",
         parts: [
-          { type: "headline", text: `Done · live on ${productName}.`, verdict: "ok" },
+          { type: "headline", text: `${productName} · plan complete.`, verdict: "ok" },
           {
             type: "text",
-            text: "Track it on **Campaigns**. I'll watch for drift and surface fixes here.",
+            text: "Final report's on your dashboard · learnings written to memory · next observation cycle queued.",
           },
         ],
       };
@@ -836,113 +771,84 @@ export function extendedIntroMessage(
 }
 
 /* ────────────────────────────────────────────────────────────────
- * Step ordering + labels for the three new flows.
+ * STEP ORDERING + LABELS + TOOL CALLS
  * ──────────────────────────────────────────────────────────────── */
 
-export const SCALE_STEPS = [
-  "scale-analyze",
-  "scale-strategies",
-  "scale-impact",
-  "scale-deploy",
-  "done",
-] as const;
-
-export const OPTIMIZE_STEPS = [
-  "opt-diagnose",
-  "opt-root-cause",
-  "opt-fix-plan",
-  "opt-deploy",
-  "done",
-] as const;
-
-export const ANGLES_STEPS = [
-  "ang-audit",
-  "ang-insights",
-  "ang-generate",
-  "ang-test-plan",
-  "done",
-] as const;
+export const SCALE_STEPS = ["scale-clarify", "scale-plan", "scale-live", "done"] as const;
+export const OPTIMIZE_STEPS = ["opt-clarify", "opt-plan", "opt-live", "done"] as const;
+export const ANGLES_STEPS = ["ang-clarify", "ang-plan", "ang-live", "done"] as const;
 
 export const EXTENDED_STEP_LABELS: Record<string, string> = {
-  "scale-analyze": "Winners",
-  "scale-strategies": "Strategies",
-  "scale-impact": "Impact",
-  "scale-deploy": "Deploy",
-  "opt-diagnose": "Diagnose",
-  "opt-root-cause": "Root cause",
-  "opt-fix-plan": "Fix plan",
-  "opt-deploy": "Deploy",
-  "ang-audit": "Audit",
-  "ang-insights": "Insights",
-  "ang-generate": "New angles",
-  "ang-test-plan": "Test plan",
+  "scale-clarify": "Setup",
+  "scale-plan": "Plan",
+  "scale-live": "Running",
+  "opt-clarify": "Setup",
+  "opt-plan": "Plan",
+  "opt-live": "Running",
+  "ang-clarify": "Setup",
+  "ang-plan": "Plan",
+  "ang-live": "Running",
 };
 
-/** Tool-call narration for each step transition in the new flows. */
+/**
+ * Tool-call narration per step transition. The clarify → plan
+ * transition is the heavy one — it shows 5 parallel agents running.
+ * (Only one tool-call is rendered at a time per the chat protocol,
+ * but the detail string lists them so it reads as parallel work.)
+ */
 export const EXTENDED_TOOL_CALLS: Record<
   string,
   { agent: string; detail: string; delayMs: number }
 > = {
-  "scale-analyze": {
-    agent: "performance.scan",
-    detail: "scanning 30d performance · ranking winners by lift × headroom…",
-    delayMs: 3400,
+  // Clarify → first step's brief acknowledgement.
+  "scale-clarify": {
+    agent: "spot.brief",
+    detail: "loading product memory · setting up clarifying questions…",
+    delayMs: 2600,
   },
-  "scale-strategies": {
-    agent: "scale.plan",
-    detail: "building scale plays · budget lift · LAL · geo · placement…",
-    delayMs: 3800,
+  "opt-clarify": {
+    agent: "spot.brief",
+    detail: "loading product memory · setting up clarifying questions…",
+    delayMs: 2600,
   },
-  "scale-impact": {
-    agent: "forecast.run",
-    detail: "projecting leads / CPL / CPQL on selected plays…",
-    delayMs: 3200,
+  "ang-clarify": {
+    agent: "spot.brief",
+    detail: "loading product memory · setting up clarifying questions…",
+    delayMs: 2600,
   },
-  "scale-deploy": {
+  // Plan — the big one. 5 parallel agents in the detail line.
+  "scale-plan": {
+    agent: "spot.plan",
+    detail:
+      "memory.read · personas.fetch · creative.audit · audience.headroom · plan.build — running in parallel…",
+    delayMs: 5800,
+  },
+  "opt-plan": {
+    agent: "spot.plan",
+    detail:
+      "memory.read · campaigns.scan · root-cause.analyze · competitor.scan · plan.build — running in parallel…",
+    delayMs: 5800,
+  },
+  "ang-plan": {
+    agent: "spot.plan",
+    detail:
+      "memory.read · creative.audit · pattern.synthesize · creative.brief · plan.build — running in parallel…",
+    delayMs: 5800,
+  },
+  // Live — quick deploy ack.
+  "scale-live": {
     agent: "deploy.push",
-    detail: "staging budget lifts · launching LAL · adding placements…",
-    delayMs: 3800,
-  },
-
-  "opt-diagnose": {
-    agent: "campaigns.scan",
-    detail: "scanning underperformers · splitting recent decay vs chronic…",
+    detail: "staging Week 1 actions · setting watchers · queueing dashboard pings…",
     delayMs: 3400,
   },
-  "opt-root-cause": {
-    agent: "root-cause.analyze",
-    detail: "creative-fatigue + sentiment + competitor + landing checks…",
-    delayMs: 4200,
-  },
-  "opt-fix-plan": {
-    agent: "fixes.draft",
-    detail: "drafting one fix per root cause · ranking by effort × impact…",
-    delayMs: 3400,
-  },
-  "opt-deploy": {
+  "opt-live": {
     agent: "deploy.push",
-    detail: "pausing fatigued ads · queueing rewrites · staging changes…",
-    delayMs: 3600,
-  },
-
-  "ang-audit": {
-    agent: "creative.audit",
-    detail: "auditing 30d creative · ranking winners + losers + unproven…",
+    detail: "pausing fatigued ad · briefing rewrites · queueing watchers…",
     delayMs: 3400,
   },
-  "ang-insights": {
-    agent: "insight.synthesize",
-    detail: "synthesising what wins vs what loses · checking memory constraints…",
-    delayMs: 3200,
-  },
-  "ang-generate": {
-    agent: "creative.brief",
-    detail: "drafting 6 angles · grounding each in a winning insight…",
-    delayMs: 4200,
-  },
-  "ang-test-plan": {
-    agent: "ab-test.plan",
-    detail: "sizing the test · picking the host ad set · setting guardrails…",
-    delayMs: 3000,
+  "ang-live": {
+    agent: "deploy.push",
+    detail: "pushing 6 angles to Meta · setting traffic split · arming early-stop guard…",
+    delayMs: 3400,
   },
 };

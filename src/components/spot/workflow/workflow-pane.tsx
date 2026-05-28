@@ -47,21 +47,16 @@ const STEP_ICONS: Record<WorkflowStep, typeof Users> = {
   forms: LayoutIcon,
   campaigns: Megaphone,
   "voice-agent": Mic,
-  // Scale flow
-  "scale-analyze": TrendingUp,
-  "scale-strategies": Sparkles,
-  "scale-impact": ChartPie,
-  "scale-deploy": PartyPopper,
-  // Optimize flow
-  "opt-diagnose": Search,
-  "opt-root-cause": ShieldAlert,
-  "opt-fix-plan": Sparkles,
-  "opt-deploy": PartyPopper,
-  // Test angles flow
-  "ang-audit": Search,
-  "ang-insights": Sparkles,
-  "ang-generate": ImageIcon,
-  "ang-test-plan": ChartPie,
+  // Diagnostic flows — 3 steps each: clarify → plan → live
+  "scale-clarify": Search,
+  "scale-plan": Sparkles,
+  "scale-live": TrendingUp,
+  "opt-clarify": Search,
+  "opt-plan": Sparkles,
+  "opt-live": ShieldAlert,
+  "ang-clarify": Search,
+  "ang-plan": Sparkles,
+  "ang-live": ImageIcon,
   // Shared
   done: PartyPopper,
 };

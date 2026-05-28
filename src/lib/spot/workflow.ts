@@ -31,21 +31,16 @@ export type WorkflowStep =
   | "forms"
   | "campaigns"
   | "voice-agent"
-  // Scale flow
-  | "scale-analyze"
-  | "scale-strategies"
-  | "scale-impact"
-  | "scale-deploy"
-  // Optimize flow
-  | "opt-diagnose"
-  | "opt-root-cause"
-  | "opt-fix-plan"
-  | "opt-deploy"
-  // Test angles flow
-  | "ang-audit"
-  | "ang-insights"
-  | "ang-generate"
-  | "ang-test-plan"
+  // Diagnostic flows — 3 steps each: clarify → plan → live
+  | "scale-clarify"
+  | "scale-plan"
+  | "scale-live"
+  | "opt-clarify"
+  | "opt-plan"
+  | "opt-live"
+  | "ang-clarify"
+  | "ang-plan"
+  | "ang-live"
   // Shared terminal state
   | "done";
 
@@ -78,21 +73,18 @@ export const STEP_LABELS: Record<WorkflowStep, string> = {
   forms: "Forms & pages",
   campaigns: "Campaign structure",
   "voice-agent": "Voice agent",
-  // extended flows — pulled from EXTENDED_STEP_LABELS so the labels
+  // diagnostic flows — pulled from EXTENDED_STEP_LABELS so the labels
   // live next to their per-flow mock content.
-  "scale-analyze": EXTENDED_STEP_LABELS["scale-analyze"],
-  "scale-strategies": EXTENDED_STEP_LABELS["scale-strategies"],
-  "scale-impact": EXTENDED_STEP_LABELS["scale-impact"],
-  "scale-deploy": EXTENDED_STEP_LABELS["scale-deploy"],
-  "opt-diagnose": EXTENDED_STEP_LABELS["opt-diagnose"],
-  "opt-root-cause": EXTENDED_STEP_LABELS["opt-root-cause"],
-  "opt-fix-plan": EXTENDED_STEP_LABELS["opt-fix-plan"],
-  "opt-deploy": EXTENDED_STEP_LABELS["opt-deploy"],
-  "ang-audit": EXTENDED_STEP_LABELS["ang-audit"],
-  "ang-insights": EXTENDED_STEP_LABELS["ang-insights"],
-  "ang-generate": EXTENDED_STEP_LABELS["ang-generate"],
-  "ang-test-plan": EXTENDED_STEP_LABELS["ang-test-plan"],
-  done: "Live",
+  "scale-clarify": EXTENDED_STEP_LABELS["scale-clarify"],
+  "scale-plan": EXTENDED_STEP_LABELS["scale-plan"],
+  "scale-live": EXTENDED_STEP_LABELS["scale-live"],
+  "opt-clarify": EXTENDED_STEP_LABELS["opt-clarify"],
+  "opt-plan": EXTENDED_STEP_LABELS["opt-plan"],
+  "opt-live": EXTENDED_STEP_LABELS["opt-live"],
+  "ang-clarify": EXTENDED_STEP_LABELS["ang-clarify"],
+  "ang-plan": EXTENDED_STEP_LABELS["ang-plan"],
+  "ang-live": EXTENDED_STEP_LABELS["ang-live"],
+  done: "Done",
 };
 
 /** Steps that show in the visible step rail (launch flow default). */
@@ -165,10 +157,15 @@ export type LaunchWorkflow = {
 };
 
 /**
- * Diagnostic workflows — Scale, Optimize, Test-Angles. All three share
- * the same shape since they're all "Spot does an analysis, you approve
- * the picks, Spot deploys". Each step gathers a set of selected IDs
- * (which strategies / fixes / angles the user wants to ship).
+ * Diagnostic workflows — Scale, Optimize, Test-Angles. Three steps:
+ *
+ *   1. clarify  — user answers 2-3 questions, verifies the brief
+ *   2. plan     — Spot runs the analysis autonomously, presents one
+ *                 time-phased plan, user approves once
+ *   3. live     — plan running, recommendations flow to dashboard
+ *
+ * `clarifyAnswers` is the answers map captured at step 1; `planApproved`
+ * gates the transition from plan → live.
  */
 export type DiagnosticWorkflow = {
   kind: "scale" | "optimize" | "test-angles";
@@ -176,15 +173,12 @@ export type DiagnosticWorkflow = {
   productId: string;
   productName: string;
   startedAt: number;
-  /** Loader → reveal gate, same pattern as LaunchWorkflow.kickoffReady. */
+  /** Loader → reveal gate. */
   ready: boolean;
-  /** Picks the user has approved at the current step (strategy/fix/angle ids). */
-  selectedIds: string[];
-  /**
-   * For Optimize: which problem campaign the user is drilling into at
-   * the root-cause step. null until they pick one.
-   */
-  focusedProblemId: string | null;
+  /** Map of clarify-question id → selected option id. */
+  clarifyAnswers: Record<string, string>;
+  /** True once the user has approved the plan. */
+  planApproved: boolean;
 };
 
 /** Any workflow currently active in the Spot store. */
@@ -940,7 +934,7 @@ export function stepIntroMessage(
   // intro copy — dispatch to extended-flows for anything not in the
   // launch flow's switch below.
   if (w.kind !== "launch-campaign") {
-    return extendedIntroMessage(step, w.productName);
+    return extendedIntroMessage(step, w.productName, w.kind);
   }
   switch (step) {
     case "personas":

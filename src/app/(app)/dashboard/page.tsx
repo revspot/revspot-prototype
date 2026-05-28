@@ -32,6 +32,10 @@ import { SpotMark } from "@/components/spot/spot-mark";
 import { useSpotStore } from "@/lib/spot/store";
 import { useCurrentUser, useCurrentWorkspaceLabel } from "@/lib/workspace-store";
 import { PRODUCTS, type ProductSummary } from "@/lib/products-data";
+import {
+  PENDING_RECOMMENDATIONS,
+  type PendingRecommendation,
+} from "@/lib/spot/extended-flows";
 
 const stagger: Variants = {
   hidden: {},
@@ -181,41 +185,8 @@ const baselineMetrics: MetricDef[] = [
 
 const CHART_DATES = ["May 10","May 11","May 12","May 13","May 14","May 15","May 16","May 17","May 18","May 19","May 20","May 21","May 22","May 23"];
 
-type Recommendation = {
-  id: string;
-  tone: "warn" | "info" | "ok";
-  title: string;
-  body: string;
-  action: string;
-  spotPrompt: string;
-};
-
-const RECOMMENDATIONS: Recommendation[] = [
-  {
-    id: "r1",
-    tone: "warn",
-    title: "Pause Self-Studier ad set — CPL drifting",
-    body: "CPL up 38% over 3 days on JEE Crack · Self-Studier cohort. Reallocate to Engineer Parent?",
-    action: "Apply with Spot",
-    spotPrompt: "Pause the Self-Studier ad set on JEE Crack and reallocate budget to Engineer Parent.",
-  },
-  {
-    id: "r2",
-    tone: "info",
-    title: "3 angles ready to approve · Engineer Parent",
-    body: "Watch-your-kid-solve, IIT-mentor, parent-dashboard. Creative Agent has assets queued.",
-    action: "Review angles",
-    spotPrompt: "Walk me through the new Engineer Parent angles ready for review.",
-  },
-  {
-    id: "r3",
-    tone: "ok",
-    title: "Lookalike audience built · Top demo attendees 30d",
-    body: "1,612 records pushed to Meta + Google. Ready to add to any campaign.",
-    action: "Use it",
-    spotPrompt: "Add the new demo-attendee lookalike to my live JEE Crack cold campaigns.",
-  },
-];
+// Pending-approval recommendations are imported from extended-flows.ts
+// so the same data drives the dashboard feed AND the workflow live state.
 
 type AgentTask = {
   agent: string;
@@ -645,51 +616,115 @@ function ProductPerformanceTable({ rows }: { rows: ProductSummary[] }) {
   );
 }
 
-/* ─── Recommendations ────────────────────────────────────────── */
+/* ─── Recommendations feed ──────────────────────────────────────
+ *
+ * Surfaces Spot's pending asks from any active diagnostic plan running
+ * across the workspace. Each chip carries enough context (evidence +
+ * projected impact) for a 5-second decision. Approve ships it; Dismiss
+ * defers it to the next watch cycle.
+ *
+ * The data lives in extended-flows.ts (PENDING_RECOMMENDATIONS) so
+ * the same shape can render both here and inside the workflow live state.
+ */
+
+const URGENCY_TONE: Record<PendingRecommendation["urgency"], { pill: string; ring: string; icon: string }> = {
+  high: { pill: "pill-err", ring: "bg-[#FEE2E2]", icon: "text-[#B91C1C]" },
+  medium: { pill: "pill-warn", ring: "bg-[#FEF3C7]", icon: "text-[#92400E]" },
+  low: { pill: "pill-info", ring: "bg-[#EFF6FF]", icon: "text-[#1D4ED8]" },
+};
+
+const SOURCE_VERB: Record<PendingRecommendation["sourceKind"], string> = {
+  scale: "Scale plan",
+  optimize: "Optimize plan",
+  "test-angles": "Angle test",
+  "launch-campaign": "Launch plan",
+};
 
 function RecommendationsCard({ askSpot }: { askSpot: (q: string) => void }) {
+  const recs = PENDING_RECOMMENDATIONS;
+  const highCount = recs.filter((r) => r.urgency === "high").length;
+
   return (
     <div className="bg-white border border-border rounded-card overflow-hidden">
       <div className="px-4 py-3 border-b border-border-subtle flex items-center gap-1.5">
         <SpotMark size={12} />
-        <span className="label-section">Spot's recommendations</span>
+        <span className="label-section">Approvals needed</span>
         <span className="flex-1" />
-        <span className="text-[11px] text-text-tertiary">{RECOMMENDATIONS.length} this week</span>
+        {highCount > 0 && (
+          <span className="pill pill-err inline-flex items-center gap-1" style={{ fontSize: 10 }}>
+            {highCount} urgent
+          </span>
+        )}
+        <span className="text-[11px] text-text-tertiary">
+          {recs.length} pending · from active plans
+        </span>
       </div>
       <div className="divide-y divide-border-subtle">
-        {RECOMMENDATIONS.map((r) => {
-          const tonePill = r.tone === "warn" ? "pill-warn" : r.tone === "ok" ? "pill-ok" : "pill-info";
-          const toneRing = r.tone === "warn" ? "bg-[#FEF3C7]" : r.tone === "ok" ? "bg-[#F0FDF4]" : "bg-[#EFF6FF]";
-          const Icon = r.tone === "warn" ? Pause : r.tone === "ok" ? Sparkles : Megaphone;
-          return (
-            <div key={r.id} className="px-4 py-3 hover-row flex items-start gap-3">
-              <div className={`flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 ${toneRing}`}>
-                <Icon
-                  size={12}
-                  strokeWidth={1.8}
-                  className={r.tone === "warn" ? "text-[#92400E]" : r.tone === "ok" ? "text-[#15803D]" : "text-[#1D4ED8]"}
-                />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="text-[13px] font-medium text-text-primary">{r.title}</span>
-                  <span className={`pill ${tonePill}`} style={{ fontSize: 10 }}>
-                    {r.tone === "warn" ? "Act" : r.tone === "ok" ? "FYI" : "Review"}
-                  </span>
-                </div>
-                <div className="text-[12px] text-text-secondary leading-snug">{r.body}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => askSpot(r.spotPrompt)}
-                className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[11.5px] font-medium flex-shrink-0"
-              >
-                <Sparkles size={10} strokeWidth={2} />
-                {r.action}
-              </button>
-            </div>
-          );
-        })}
+        {recs.map((r) => (
+          <DashboardRecommendation key={r.id} rec={r} askSpot={askSpot} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardRecommendation({
+  rec,
+  askSpot,
+}: {
+  rec: PendingRecommendation;
+  askSpot: (q: string) => void;
+}) {
+  const tone = URGENCY_TONE[rec.urgency];
+  const Icon = rec.urgency === "high" ? Pause : rec.urgency === "medium" ? Megaphone : Sparkles;
+
+  return (
+    <div className="px-4 py-3 hover-row">
+      <div className="flex items-start gap-3">
+        <div className={`flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 ${tone.ring}`}>
+          <Icon size={12} strokeWidth={1.8} className={tone.icon} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center flex-wrap gap-1.5 mb-0.5">
+            <span className="text-[13px] font-semibold text-text-primary">{rec.title}</span>
+            <span className={`pill ${tone.pill}`} style={{ fontSize: 10 }}>
+              {rec.urgency}
+            </span>
+          </div>
+          <div className="text-[11px] text-text-tertiary mb-1">
+            {SOURCE_VERB[rec.sourceKind]} · {rec.sourceProduct} · {rec.surfacedAt}
+          </div>
+          <div className="text-[12px] text-text-secondary leading-snug mb-1.5">{rec.detail}</div>
+          {rec.evidence.length > 0 && (
+            <ul className="space-y-0.5 mb-1.5">
+              {rec.evidence.slice(0, 3).map((e, i) => (
+                <li key={i} className="text-[11px] text-text-tertiary flex gap-1.5">
+                  <span>·</span>
+                  <span>{e}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="text-[11.5px] text-text-secondary mt-1.5 pt-1.5 border-t border-border-subtle">
+            <span className="text-text-tertiary">If approved:</span> {rec.projectedImpact}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => askSpot(`Apply: ${rec.title}. Detail: ${rec.detail}`)}
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[11.5px] font-medium"
+          >
+            <SpotMark size={10} />
+            Approve
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center justify-center h-7 px-2.5 rounded-button text-[11px] text-text-tertiary hover:text-text-primary hover:bg-surface-secondary"
+          >
+            Dismiss
+          </button>
+        </div>
       </div>
     </div>
   );
