@@ -625,8 +625,25 @@ function ProductSetupQuestionCard({
   const isLast = step === TOTAL - 1;
   const canSkipThis = step !== 0; // name is required
 
+  /** Mirror this step's user answer into the chat thread before
+   *  advancing — so the left panel reflects the user's response
+   *  even though they typed/dropped it into the card. */
+  const appendUserMessage = (text: string) => {
+    if (!text.trim()) return;
+    useSpotStore.getState().appendMessage({ role: "user", text });
+  };
+
   const finish = () => {
     if (!canSubmit) return;
+    // Last step is "files" — mirror what they dropped (or "Skipped" if
+    // they hit the Skip button, handled in handleSkip below).
+    if (fileNames.length > 0) {
+      const head = fileNames.slice(0, 3).join(", ");
+      const more = fileNames.length > 3 ? ` +${fileNames.length - 3} more` : "";
+      appendUserMessage(`📎 ${head}${more}`);
+    } else {
+      appendUserMessage("No files for now.");
+    }
     onSubmit({
       name: name.trim(),
       url: url.trim() || undefined,
@@ -635,12 +652,40 @@ function ProductSetupQuestionCard({
   };
 
   const goNext = () => {
-    if (isLast) {
-      finish();
+    if (step === 0) {
+      // Q1 — name. Required. Mirror as user message + advance.
+      if (!canSubmit) return;
+      appendUserMessage(name.trim());
+      setStep(1);
+    } else if (step === 1) {
+      // Q2 — URL. Optional. If filled, mirror it; otherwise treat as skip.
+      if (url.trim()) {
+        appendUserMessage(url.trim());
+      } else {
+        appendUserMessage("Skipped — no URL yet.");
+      }
+      setStep(2);
     } else {
-      setStep((s) => Math.min(s + 1, TOTAL - 1));
+      // Q3 — files. finish() handles mirroring + submit.
+      finish();
     }
   };
+
+  const handleSkip = () => {
+    if (step === 1) {
+      appendUserMessage("Skipped — no URL yet.");
+      setStep(2);
+    } else if (step === 2) {
+      appendUserMessage("Skipped — no files for now.");
+      // Still submit so deep research kicks off.
+      onSubmit({
+        name: name.trim(),
+        url: url.trim() || undefined,
+        files: undefined,
+      });
+    }
+  };
+
   const goPrev = () => setStep((s) => Math.max(s - 1, 0));
 
   const question =
@@ -824,7 +869,7 @@ function ProductSetupQuestionCard({
           {canSkipThis && (
             <button
               type="button"
-              onClick={goNext}
+              onClick={handleSkip}
               className="text-[12px] py-1.5 px-3 rounded-button text-text-secondary hover:text-text-primary hover:bg-surface-secondary transition-colors"
             >
               Skip

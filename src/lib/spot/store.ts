@@ -412,21 +412,6 @@ export const useSpotStore = create<PanelState>((set) => ({
     const url = data.url?.trim() || undefined;
     const files = data.files && data.files.length > 0 ? data.files : undefined;
 
-    // Build a user-message summary that mirrors the form back into chat.
-    // Looks like a single block, the way Claude shows a multi-field
-    // submission: name + url + file chips.
-    const lines: string[] = [`**${trimmedName}**`];
-    if (url) lines.push(`URL · ${url}`);
-    if (files) {
-      const head = files.slice(0, 3).join(", ");
-      const more = files.length > 3 ? ` +${files.length - 3} more` : "";
-      lines.push(`📎 ${head}${more}`);
-    }
-    const userMsg: SpotMessage = {
-      role: "user",
-      text: lines.join("\n"),
-    };
-
     const answers: ProductSetupAnswers = {
       name: trimmedName,
       url,
@@ -441,15 +426,14 @@ export const useSpotStore = create<PanelState>((set) => ({
       productSetupModalOpen: false,
     };
 
-    // Append the user's form summary to the thread. No "got it" Spot
-    // reply here — startDeepResearch fires the next Spot message
-    // (including its tool-call) so we don't double-speak.
-    set((s) => ({
+    // The question card mirrors each answer as a user message as the
+    // user advances — no need to append a combined summary here.
+    // Just flip workflow state and let deep research take it from here.
+    set(() => ({
       workflow: nextWorkflow,
-      thread: [...s.thread, userMsg],
     }));
 
-    // Kick off deep research after a brief beat so the user message lands.
+    // Kick off deep research after a brief beat.
     setTimeout(() => {
       const cur = useSpotStore.getState();
       if (cur.workflow?.step !== "product-setup") return;
