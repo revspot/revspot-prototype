@@ -553,6 +553,96 @@
 
 /* H2 gold dot indicator stays gold in dark mode too — already inline. */
 
+/* ─── Diagnostic steps · dark canvas overrides ──────────────────
+ * The AnalyzeStep / ClarifyStep / PlanStep / LiveStep components
+ * were built for the light canvas and use Tailwind tokens like
+ * `bg-white`, `text-text-primary`, `border-border`. Now that they
+ * render on the dark right pane, this scoped wrapper class flips
+ * every token to its dark equivalent so white-on-white bugs go away.
+ * ─────────────────────────────────────────────────────────────── */
+
+.diagnostic-dark {
+  color: #F5F4EF;
+}
+
+/* Surfaces */
+.diagnostic-dark .bg-white            { background: #1A1A18 !important; }
+.diagnostic-dark .bg-surface-page     { background: #15140F !important; }
+.diagnostic-dark .bg-surface-secondary { background: #1F1F1D !important; }
+
+/* Text */
+.diagnostic-dark .text-text-primary   { color: #F5F4EF !important; }
+.diagnostic-dark .text-text-secondary { color: #B8B7B0 !important; }
+.diagnostic-dark .text-text-tertiary  { color: #8A8980 !important; }
+
+/* Borders */
+.diagnostic-dark .border-border         { border-color: #2E2E2A !important; }
+.diagnostic-dark .border-border-subtle  { border-color: #262623 !important; }
+.diagnostic-dark .border-border-hover   { border-color: #3A3A35 !important; }
+.diagnostic-dark .hover\:border-border:hover { border-color: #3A3A35 !important; }
+.diagnostic-dark .hover\:border-border-hover:hover { border-color: #4A4A45 !important; }
+
+/* Inputs and code-style spans */
+.diagnostic-dark input,
+.diagnostic-dark textarea,
+.diagnostic-dark select {
+  background: #1F1F1D !important;
+  color: #F5F4EF !important;
+  border-color: #2E2E2A !important;
+}
+.diagnostic-dark code {
+  background: #1F1F1D !important;
+  border-color: #2E2E2A !important;
+  color: #E8E0C8 !important;
+}
+
+/* Hover states on rows + buttons */
+.diagnostic-dark .hover\:bg-surface-secondary:hover { background: #1F1F1D !important; }
+.diagnostic-dark .hover-row:hover { background: #1F1F1D !important; }
+
+/* Pill / chip tones — keep the accent colors readable on dark */
+.diagnostic-dark .pill {
+  background: #1F1F1D !important;
+  border-color: #2E2E2A !important;
+  color: #D6D6CE !important;
+}
+.diagnostic-dark .pill-ok {
+  background: #0E2A1A !important;
+  border-color: #1A4D2A !important;
+  color: #34D399 !important;
+}
+.diagnostic-dark .pill-err {
+  background: #2A1010 !important;
+  border-color: #4D1A1A !important;
+  color: #F87171 !important;
+}
+.diagnostic-dark .pill-warn {
+  background: #2A2210 !important;
+  border-color: #4D3D1A !important;
+  color: #FCD34D !important;
+}
+.diagnostic-dark .pill-info {
+  background: #102A2A !important;
+  border-color: #1A4D4D !important;
+  color: #67E8F9 !important;
+}
+
+/* Tinted signal-card rings used in AnalyzeStep · soften on dark */
+.diagnostic-dark .bg-\[\#F0FDF4\] { background: #0E2A1A !important; }
+.diagnostic-dark .bg-\[\#FEE2E2\] { background: #2A1010 !important; }
+.diagnostic-dark .bg-\[\#FEF3C7\] { background: #2A2210 !important; }
+.diagnostic-dark .bg-\[\#FAF8F2\] { background: #1F1B14 !important; }
+
+/* Action button primaries (black on light) need to invert to cream */
+.diagnostic-dark .bg-\[\#111\]  { background: #FAFAF8 !important; color: #0A0A09 !important; }
+.diagnostic-dark .text-\[\#FAFAF8\] { color: #0A0A09 !important; }
+
+/* Tabular numerics in metric cards */
+.diagnostic-dark .tabular { color: inherit; }
+
+/* Dividers */
+.diagnostic-dark .divide-y > * + * { border-top-color: #262623 !important; }
+
 /* Tilt — gentle wobble of the core. No halo. */
 .spot-tilt {
   display: inline-flex;

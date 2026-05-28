@@ -588,7 +588,7 @@ function FileBody({
       );
     }
     return (
-      <div className="px-6 py-5">
+      <div className="px-6 py-5 diagnostic-dark">
         <DiagnosticStep workflow={workflow as DiagnosticWorkflow} />
       </div>
     );
