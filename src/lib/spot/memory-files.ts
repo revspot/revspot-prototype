@@ -1,10 +1,11 @@
 // Memory is structured by Product. Each product is a "project" inside
 // memory with a tiny filesystem behind it:
 //
-//   product-info.md   — long-form product brief (renders on the Brief tab)
-//   plan.md           — the long-lived strategic plan (renders on Plan tab)
-//   performance.html  — rich metrics dashboard (NOT markdown — interactive)
-//   assets/           — creatives + landing pages + forms (structured)
+//   product-info.md      — long-form product brief (renders on the Brief tab)
+//   plan.md              — the long-lived strategic plan (renders on Plan tab)
+//   performance.html     — rich metrics dashboard (NOT markdown — interactive)
+//   assets/              — creatives + landing pages + forms + search ads
+//   change-history.md    — append-only log of every change to the memory
 //
 // We keep the textual fields as actual markdown strings so the demo
 // can render them through a minimal md-render and so they read like
@@ -20,16 +21,40 @@ import { PRODUCT_PLANS, type ProductPlan } from "./extended-flows";
  * SHAPED ASSET TYPES — what shows up under the Assets tab.
  * ──────────────────────────────────────────────────────────────── */
 
+export type CreativeSize = "1:1" | "4:5" | "9:16" | "16:9";
+
 export type MemoryCreative = {
   id: string;
   label: string;
-  format: "1:1" | "4:5" | "9:16" | "16:9";
+  /** Primary aspect — the source ratio Spot designed for. */
+  format: CreativeSize;
+  /** All resized variants available (Resize Agent output). */
+  sizes: CreativeSize[];
   kind: "image" | "video" | "carousel";
   state: "live" | "ready" | "shell";
   /** Persona shortLabel. */
   personaName: string;
   /** Hue for the placeholder gradient. */
   hue: number;
+};
+
+/**
+ * Google-side search ad copies that live under Assets. Each search ad
+ * has a primary headline + description, a few variant copies, and a
+ * Google "ad strength" diagnostic.
+ */
+export type MemorySearchAd = {
+  id: string;
+  /** Brand / Category / Competitor — which keyword bucket this ad serves. */
+  campaign: "Brand" | "Category" | "Competitor";
+  primaryHeadline: string;
+  primaryDescription: string;
+  /** Additional headline variants Google rotates between. */
+  headlineVariants: string[];
+  /** Keyword list (truncated · comma-separated). */
+  keywords: string;
+  adStrength: "excellent" | "good" | "average";
+  status: "live" | "draft";
 };
 
 export type MemoryLandingPage = {
@@ -61,6 +86,7 @@ export type MemoryForm = {
 
 export type MemoryAssets = {
   creatives: MemoryCreative[];
+  searchAds: MemorySearchAd[];
   landingPages: MemoryLandingPage[];
   forms: MemoryForm[];
 };
@@ -84,6 +110,8 @@ export type ProductMemoryFiles = {
   productInfoMd: string;
   /** Markdown content of plan.md */
   planMd: string;
+  /** Markdown content of change-history.md · append-only log */
+  changeHistoryMd: string;
   /** Structured performance metrics for the rich dashboard. */
   performance: {
     headline: string;
@@ -95,7 +123,7 @@ export type ProductMemoryFiles = {
     /** Per-channel split of the spend. */
     channelMix: { name: string; share: number; color: string }[];
   };
-  /** Assets — creatives, landing pages, forms. */
+  /** Assets — creatives, search ads, landing pages, forms. */
   assets: MemoryAssets;
 };
 
@@ -318,10 +346,21 @@ function buildAssets(p: ProductSummary): MemoryAssets {
   for (const persona of PERSONAS) {
     for (const c of persona.creatives) {
       if (c.productId === p.id) {
+        // Resize Agent expands each creative across the standard 4
+        // formats. Live creatives have all 4 sizes baked; ready
+        // creatives have the source + the two key formats; shells
+        // only have their source size while waiting on Resize.
+        const sizes: CreativeSize[] =
+          c.state === "live"
+            ? ["1:1", "4:5", "9:16", "16:9"]
+            : c.state === "ready"
+              ? Array.from(new Set<CreativeSize>([c.format, "1:1", "9:16"]))
+              : [c.format];
         creatives.push({
           id: c.id,
           label: c.label,
           format: c.format,
+          sizes,
           kind: c.kind,
           state: c.state,
           personaName: persona.shortLabel,
@@ -365,7 +404,132 @@ function buildAssets(p: ProductSummary): MemoryAssets {
     };
   });
 
-  return { creatives, landingPages, forms };
+  const searchAds: MemorySearchAd[] = buildSearchAds(p);
+
+  return { creatives, searchAds, landingPages, forms };
+}
+
+/**
+ * Google search ad copies per product · brand defense + category +
+ * (where the product has competitor pressure) competitor-bidding ad.
+ * Headlines mention the product name + leaning into the strongest USP
+ * we know about (live cohort + mentor-led, biology-first for NEET, etc.).
+ */
+function buildSearchAds(p: ProductSummary): MemorySearchAd[] {
+  const out: MemorySearchAd[] = [
+    {
+      id: `sa-${p.id}-brand`,
+      campaign: "Brand",
+      primaryHeadline: `${p.name} · official`,
+      primaryDescription: p.tagline,
+      headlineVariants: [
+        `${p.name} · live cohort`,
+        `Join ${p.name} · book a free demo`,
+        `${p.name} · capped batches, real mentors`,
+      ],
+      keywords: `${p.name.toLowerCase()}, ${p.name.toLowerCase().replace(/'/g, "")}, guyjus ${p.name.split(" ").slice(-1)[0].toLowerCase()}`,
+      adStrength: "excellent",
+      status: "live",
+    },
+    {
+      id: `sa-${p.id}-category`,
+      campaign: "Category",
+      primaryHeadline: `${p.category.split("·")[0].trim()} · live mentors`,
+      primaryDescription:
+        "Cohort capped at 60 · live doubt-clearing · weekly all-India mocks. Free demo class today.",
+      headlineVariants: [
+        "Live cohort · mentor-led classes",
+        "Weekly all-India mocks · ranked",
+        "24-month replay access",
+        "Free demo class · book today",
+      ],
+      keywords: "online coaching, live mentor classes, best preparation online, free demo",
+      adStrength: "good",
+      status: "live",
+    },
+  ];
+  // Competitor-bidding ad — only for products with category-level
+  // competitive pressure flagged in memory.
+  if (
+    p.avoid.some((a) => /(Allen|Aakash|FIITJEE)/i.test(a)) ||
+    p.id === "prod-guyjus-jee"
+  ) {
+    out.push({
+      id: `sa-${p.id}-comp`,
+      campaign: "Competitor",
+      primaryHeadline: "Switching coaching? Try Guyju's",
+      primaryDescription:
+        "Cover the gap mid-year · live doubt-clearing · mentor 1:1 monthly. Free demo class.",
+      headlineVariants: [
+        "Looking for an alternative?",
+        "Live online cohort · no auditorium",
+        "Bring your old syllabus · we cover the gap",
+      ],
+      keywords: "coaching alternative, switch coaching online, online prep alternative",
+      adStrength: "good",
+      status: "draft",
+    });
+  }
+  return out;
+}
+
+/**
+ * Append-only log of every change to this product's memory. Pulls
+ * straight from p.memory + plan.history so the timeline is always
+ * sourced from real entries.
+ */
+function buildChangeHistoryMd(p: ProductSummary): string {
+  const plan = PRODUCT_PLANS.find((pl) => pl.productId === p.id);
+  // Merge product-memory entries + plan-history entries, sort newest first.
+  type Row = { at: string; who: string; kind: string; entry: string };
+  const rows: Row[] = [];
+  for (const m of p.memory) {
+    rows.push({
+      at: m.at,
+      who: m.who,
+      kind: humaniseKind(m.kind),
+      entry: m.summary,
+    });
+  }
+  if (plan) {
+    for (const h of plan.history) {
+      rows.push({
+        at: h.at,
+        who: h.who,
+        kind: "Plan",
+        entry: h.entry,
+      });
+    }
+  }
+  rows.sort((a, b) => (a.at < b.at ? 1 : -1));
+
+  const body = rows
+    .map((r) => `### ${r.at} · ${r.who}\n\n_${r.kind}_\n\n${r.entry}`)
+    .join("\n\n---\n\n");
+
+  return `# Change history · ${p.name}
+
+Every change to this product's memory · append-only. Spot writes here
+whenever it learns something new; humans show up when they correct,
+add a constraint, or approve a change.
+
+_${rows.length} entries · newest first_
+
+---
+
+${body || "_No changes yet · memory is fresh._"}
+`;
+}
+
+function humaniseKind(kind: string): string {
+  const map: Record<string, string> = {
+    brief: "Brief",
+    usp: "USP locked",
+    "persona-link": "Persona linked",
+    "creative-feedback": "Creative learning",
+    constraint: "Constraint added",
+  };
+  return map[kind] ?? kind;
 }
 
 function inr(n: number): string {
@@ -386,6 +550,7 @@ export const MEMORY_FILES: ProductMemoryFiles[] = PRODUCTS.map((p) => {
     productName: p.name,
     productInfoMd: buildProductInfoMd(p),
     planMd: buildPlanMd(p, plan),
+    changeHistoryMd: buildChangeHistoryMd(p),
     performance: buildPerformance(p),
     assets: buildAssets(p),
   };

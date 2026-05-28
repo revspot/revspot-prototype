@@ -34,19 +34,22 @@ import {
   Layout,
   Smartphone,
   ArrowUpRight,
+  History,
+  Search,
 } from "lucide-react";
 import { PRODUCTS } from "@/lib/products-data";
 import { MEMORY_FILES, memoryFilesFor, type ProductMemoryFiles } from "@/lib/spot/memory-files";
 import { PRODUCT_PLANS, PLAN_STATUS_TONE, PLAN_STATUS_LABEL } from "@/lib/spot/extended-flows";
 import { Markdown } from "@/components/memory/md-render";
 
-type TabKey = "brief" | "plan" | "performance" | "assets";
+type TabKey = "brief" | "plan" | "performance" | "assets" | "history";
 
 const TABS: { key: TabKey; label: string; icon: typeof FileText; file: string }[] = [
   { key: "brief", label: "Product brief", icon: FileText, file: "product-info.md" },
   { key: "plan", label: "Plan", icon: Target, file: "plan.md" },
   { key: "performance", label: "Performance", icon: TrendingUp, file: "performance.html" },
   { key: "assets", label: "Assets", icon: Boxes, file: "assets/" },
+  { key: "history", label: "Change history", icon: History, file: "change-history.md" },
 ];
 
 export default function MemoryPage() {
@@ -89,6 +92,7 @@ export default function MemoryPage() {
               {tab === "plan" && <PlanTab files={files} />}
               {tab === "performance" && <PerformanceTab files={files} />}
               {tab === "assets" && <AssetsTab files={files} />}
+              {tab === "history" && <HistoryTab files={files} />}
             </div>
           </div>
         )}
@@ -187,7 +191,12 @@ function TabNav({
   files: ProductMemoryFiles;
 }) {
   const tabCounts: Partial<Record<TabKey, string>> = {
-    assets: `${files.assets.creatives.length + files.assets.landingPages.length + files.assets.forms.length}`,
+    assets: `${
+      files.assets.creatives.length +
+      files.assets.searchAds.length +
+      files.assets.landingPages.length +
+      files.assets.forms.length
+    }`,
   };
   return (
     <div className="flex items-end px-6 border-b border-border-subtle bg-surface-page">
@@ -210,12 +219,6 @@ function TabNav({
                 {tabCounts[t.key]}
               </span>
             )}
-            <span
-              className="text-[10px] text-text-tertiary font-mono ml-0.5"
-              style={{ opacity: active ? 0.7 : 0.4 }}
-            >
-              {t.file}
-            </span>
             {active && (
               <span
                 aria-hidden
@@ -229,23 +232,102 @@ function TabNav({
   );
 }
 
-/* ─── Brief tab · markdown content ─────────────────────────────── */
-
-function BriefTab({ files }: { files: ProductMemoryFiles }) {
+/**
+ * Tiny breadcrumb-style file-path line that sits below the heading
+ * inside each tab. Reads like `memory / jee-crack / product-info.md`
+ * so the user knows which "file" they're looking at without it
+ * cluttering the tab navigation chrome.
+ */
+function FilePathBreadcrumb({
+  productId,
+  file,
+}: {
+  productId: string;
+  file: string;
+}) {
+  const slug = productId.replace(/^prod-/, "");
   return (
-    <div className="max-w-[720px]">
-      <Markdown source={files.productInfoMd} />
+    <div className="font-mono text-[10.5px] text-text-tertiary mb-4 inline-flex items-center gap-1">
+      <span>memory</span>
+      <span className="text-text-tertiary/60">/</span>
+      <span>{slug}</span>
+      <span className="text-text-tertiary/60">/</span>
+      <span className="text-text-secondary">{file}</span>
     </div>
   );
 }
 
-/* ─── Plan tab · markdown content ──────────────────────────────── */
+/* ─── Brief tab · markdown content ─────────────────────────────── */
+
+/**
+ * Split a markdown source into its first H1 (the heading) and the rest
+ * of the body. Lets us render the file path breadcrumb between the
+ * heading and the body — visually right under the heading.
+ */
+function splitHeading(src: string): { heading: string | null; rest: string } {
+  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  let h: string | null = null;
+  const restLines: string[] = [];
+  let consumed = false;
+  for (const line of lines) {
+    if (!consumed && /^#\s+/.test(line)) {
+      h = line.replace(/^#\s+/, "");
+      consumed = true;
+      continue;
+    }
+    restLines.push(line);
+  }
+  return { heading: h, rest: restLines.join("\n").trimStart() };
+}
+
+function MdFileBody({
+  source,
+  productId,
+  file,
+}: {
+  source: string;
+  productId: string;
+  file: string;
+}) {
+  const { heading, rest } = splitHeading(source);
+  return (
+    <div className="max-w-[720px]">
+      {heading && (
+        <h1 className="text-[22px] font-semibold text-text-primary tracking-tight mt-0 mb-1">
+          {heading}
+        </h1>
+      )}
+      {/* File path lives right under the heading, in monospace, muted —
+          present enough to orient, quiet enough not to obstruct. */}
+      <FilePathBreadcrumb productId={productId} file={file} />
+      <Markdown source={rest} />
+    </div>
+  );
+}
+
+function BriefTab({ files }: { files: ProductMemoryFiles }) {
+  return (
+    <MdFileBody
+      source={files.productInfoMd}
+      productId={files.productId}
+      file="product-info.md"
+    />
+  );
+}
 
 function PlanTab({ files }: { files: ProductMemoryFiles }) {
   return (
-    <div className="max-w-[720px]">
-      <Markdown source={files.planMd} />
-    </div>
+    <MdFileBody source={files.planMd} productId={files.productId} file="plan.md" />
+  );
+}
+
+function HistoryTab({ files }: { files: ProductMemoryFiles }) {
+  return (
+    <MdFileBody
+      source={files.changeHistoryMd}
+      productId={files.productId}
+      file="change-history.md"
+    />
   );
 }
 
@@ -256,7 +338,11 @@ function PerformanceTab({ files }: { files: ProductMemoryFiles }) {
   return (
     <div>
       <div className="mb-4">
-        <div className="text-[10.5px] uppercase tracking-wider text-text-tertiary font-semibold mb-1">
+        <h1 className="text-[22px] font-semibold text-text-primary tracking-tight mt-0 mb-1">
+          Performance
+        </h1>
+        <FilePathBreadcrumb productId={files.productId} file="performance.html" />
+        <div className="text-[12px] text-text-secondary leading-relaxed">
           Snapshot · {perf.headline}
         </div>
       </div>
@@ -412,59 +498,81 @@ function ChartCard({
 /* ─── Assets tab ──────────────────────────────────────────────── */
 
 function AssetsTab({ files }: { files: ProductMemoryFiles }) {
-  const { creatives, landingPages, forms } = files.assets;
+  const { creatives, searchAds, landingPages, forms } = files.assets;
   return (
-    <div className="space-y-5">
-      {/* Creatives */}
-      <section>
-        <AssetSectionHeader
-          icon={ImageIcon}
-          title="Creatives"
-          count={creatives.length}
-          subtitle="Every angle Spot has built for this product, across all linked personas."
-        />
-        {creatives.length === 0 ? (
-          <div className="text-[12.5px] text-text-tertiary italic px-1">
-            No creatives yet — Spot writes them here as it builds.
-          </div>
-        ) : (
-          <div className="grid grid-cols-4 gap-2.5">
-            {creatives.map((c) => (
-              <CreativeCard key={c.id} c={c} />
+    <div>
+      <h1 className="text-[22px] font-semibold text-text-primary tracking-tight mt-0 mb-1">
+        Assets
+      </h1>
+      <FilePathBreadcrumb productId={files.productId} file="assets/" />
+
+      <div className="space-y-5">
+        {/* Creatives */}
+        <section>
+          <AssetSectionHeader
+            icon={ImageIcon}
+            title="Visual creatives"
+            count={creatives.length}
+            subtitle="Every angle Spot has built · each with the sizes Resize Agent has produced."
+          />
+          {creatives.length === 0 ? (
+            <div className="text-[12.5px] text-text-tertiary italic px-1">
+              No creatives yet — Spot writes them here as it builds.
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-2.5">
+              {creatives.map((c) => (
+                <CreativeCard key={c.id} c={c} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Search ads */}
+        <section>
+          <AssetSectionHeader
+            icon={Search}
+            title="Search ads"
+            count={searchAds.length}
+            subtitle="Google search ad copies · brand, category, competitor buckets."
+          />
+          <div className="space-y-2">
+            {searchAds.map((sa) => (
+              <SearchAdCard key={sa.id} sa={sa} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
 
-      {/* Landing pages */}
-      <section>
-        <AssetSectionHeader
-          icon={Smartphone}
-          title="Landing pages"
-          count={landingPages.length}
-          subtitle="Mobile-first pages Spot has built for this product."
-        />
-        <div className="grid grid-cols-3 gap-2.5">
-          {landingPages.map((lp) => (
-            <LandingPageCard key={lp.id} lp={lp} />
-          ))}
-        </div>
-      </section>
+        {/* Landing pages */}
+        <section>
+          <AssetSectionHeader
+            icon={Smartphone}
+            title="Landing pages"
+            count={landingPages.length}
+            subtitle="Mobile-first pages Spot has built for this product."
+          />
+          <div className="grid grid-cols-3 gap-2.5">
+            {landingPages.map((lp) => (
+              <LandingPageCard key={lp.id} lp={lp} />
+            ))}
+          </div>
+        </section>
 
-      {/* Forms */}
-      <section>
-        <AssetSectionHeader
-          icon={Layout}
-          title="Lead forms"
-          count={forms.length}
-          subtitle="Meta lead forms + click-to-WhatsApp scripts."
-        />
-        <div className="grid grid-cols-2 gap-2.5">
-          {forms.map((f) => (
-            <FormCard key={f.id} f={f} />
-          ))}
-        </div>
-      </section>
+        {/* Forms */}
+        <section>
+          <AssetSectionHeader
+            icon={Layout}
+            title="Lead forms"
+            count={forms.length}
+            subtitle="Meta lead forms + click-to-WhatsApp scripts."
+          />
+          <div className="grid grid-cols-2 gap-2.5">
+            {forms.map((f) => (
+              <FormCard key={f.id} f={f} />
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -500,6 +608,14 @@ function CreativeCard({
   const Icon = c.kind === "video" ? Film : c.kind === "carousel" ? Layout : ImageIcon;
   const stateColor =
     c.state === "live" ? "bg-[#22C55E]" : c.state === "ready" ? "bg-[#F5A623]" : "bg-[#D4D4D4]";
+  // Canonical size order — keep chips reading left-to-right consistently.
+  const SIZE_ORDER: import("@/lib/spot/memory-files").CreativeSize[] = [
+    "1:1",
+    "4:5",
+    "9:16",
+    "16:9",
+  ];
+  const sortedSizes = SIZE_ORDER.filter((s) => c.sizes.includes(s));
   return (
     <div className="bg-white border border-border rounded-card overflow-hidden">
       <div
@@ -512,7 +628,7 @@ function CreativeCard({
           <Icon size={10} strokeWidth={1.7} />
         </div>
         <div className="absolute top-2 right-2 text-[9.5px] font-medium text-text-secondary bg-white/85 px-1.5 rounded-sm">
-          {c.format}
+          source · {c.format}
         </div>
         <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 bg-white/90 px-1.5 py-0.5 rounded-sm text-[9.5px] font-medium">
           <span className={`w-1.5 h-1.5 rounded-full ${stateColor}`} />
@@ -523,7 +639,120 @@ function CreativeCard({
         <div className="text-[11.5px] font-medium text-text-primary leading-snug line-clamp-2 min-h-[2.6em]">
           {c.label}
         </div>
-        <div className="text-[10.5px] text-text-tertiary mt-1">{c.personaName}</div>
+        <div className="text-[10.5px] text-text-tertiary mt-1 mb-1.5">{c.personaName}</div>
+        {/* Available sizes — Resize Agent output. Tiny chips per ratio. */}
+        <div className="flex items-center gap-1 flex-wrap pt-1.5 border-t border-border-subtle">
+          <span className="text-[9.5px] uppercase tracking-wider text-text-tertiary mr-0.5">
+            Sizes
+          </span>
+          {sortedSizes.map((s) => (
+            <span
+              key={s}
+              className="inline-flex items-center justify-center h-[16px] px-1.5 rounded-[3px] bg-surface-page border border-border-subtle text-[9.5px] font-mono text-text-secondary tabular"
+            >
+              {s}
+            </span>
+          ))}
+          {c.sizes.length < 4 && (
+            <span className="text-[9.5px] text-text-tertiary italic">
+              · {4 - c.sizes.length} pending
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchAdCard({
+  sa,
+}: {
+  sa: import("@/lib/spot/memory-files").MemorySearchAd;
+}) {
+  const strengthTone =
+    sa.adStrength === "excellent"
+      ? "pill-ok"
+      : sa.adStrength === "good"
+        ? "pill-info"
+        : "pill-warn";
+  const campaignBg =
+    sa.campaign === "Brand"
+      ? "bg-[#EFF6FF] text-[#1D4ED8]"
+      : sa.campaign === "Category"
+        ? "bg-[#F0FDF4] text-[#15803D]"
+        : "bg-[#FEF3C7] text-[#92400E]";
+  return (
+    <div className="bg-white border border-border rounded-card p-4">
+      <div className="flex items-start gap-3">
+        {/* Tiny Google search-result mock */}
+        <div className="w-9 h-9 rounded-card bg-white border border-border-subtle flex items-center justify-center flex-shrink-0">
+          <Search size={14} strokeWidth={1.7} className="text-text-secondary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+            <span
+              className={`inline-flex items-center h-[18px] px-1.5 rounded-[3px] text-[10px] font-semibold uppercase tracking-wider ${campaignBg}`}
+            >
+              {sa.campaign}
+            </span>
+            <span className={`pill ${strengthTone}`} style={{ fontSize: 10 }}>
+              Ad strength · {sa.adStrength}
+            </span>
+            <span
+              className={`pill ${sa.status === "live" ? "pill-ok" : "pill"}`}
+              style={{ fontSize: 10 }}
+            >
+              {sa.status}
+            </span>
+            <span className="text-[10.5px] text-text-tertiary ml-auto">
+              {sa.headlineVariants.length + 1} headlines
+            </span>
+          </div>
+
+          {/* Primary ad copy — rendered like a Google SERP result */}
+          <div className="bg-surface-page border border-border-subtle rounded-input p-3 mb-2">
+            <div className="text-[10px] text-text-tertiary mb-0.5 inline-flex items-center gap-1">
+              <span className="font-mono">Ad ·</span>
+              <span>guyjus.com</span>
+            </div>
+            <div className="text-[14px] font-medium leading-tight text-[#1A0DAB] mb-0.5">
+              {sa.primaryHeadline}
+            </div>
+            <div className="text-[12px] text-text-secondary leading-relaxed">
+              {sa.primaryDescription}
+            </div>
+          </div>
+
+          {/* Headline variants */}
+          {sa.headlineVariants.length > 0 && (
+            <div className="mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold mb-1">
+                Headline variants · Google rotates
+              </div>
+              <ul className="space-y-0.5">
+                {sa.headlineVariants.map((h, i) => (
+                  <li
+                    key={i}
+                    className="text-[11.5px] text-text-secondary leading-snug flex gap-1.5"
+                  >
+                    <span className="text-text-tertiary tabular">
+                      {String(i + 2).padStart(2, "0")}
+                    </span>
+                    <span>{h}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Keywords */}
+          <div className="text-[11px] text-text-tertiary leading-snug pt-2 border-t border-border-subtle">
+            <span className="uppercase tracking-wider text-[10px] font-semibold">
+              Keywords ·{" "}
+            </span>
+            {sa.keywords}
+          </div>
+        </div>
       </div>
     </div>
   );
