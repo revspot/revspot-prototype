@@ -52,10 +52,18 @@ export type WorkflowStep =
   | "ang-clarify"
   | "ang-plan"
   | "ang-live"
+  // Campaign dive · single-step "Spot it" surface that opens
+  // chat-on-left + campaign-detail-on-right from the campaigns table
+  | "campaign-dive"
   // Shared terminal state
   | "done";
 
-export type WorkflowKind = "launch-campaign" | "scale" | "optimize" | "test-angles";
+export type WorkflowKind =
+  | "launch-campaign"
+  | "scale"
+  | "optimize"
+  | "test-angles"
+  | "campaign-dive";
 
 export const STEP_ORDER: WorkflowStep[] = [
   "deep-research",
@@ -98,6 +106,7 @@ export const STEP_LABELS: Record<WorkflowStep, string> = {
   "ang-clarify": EXTENDED_STEP_LABELS["ang-clarify"],
   "ang-plan": EXTENDED_STEP_LABELS["ang-plan"],
   "ang-live": EXTENDED_STEP_LABELS["ang-live"],
+  "campaign-dive": "Spot it",
   done: "Done",
 };
 
@@ -115,6 +124,7 @@ export const STEP_ORDER_BY_KIND: Record<WorkflowKind, readonly WorkflowStep[]> =
   scale: SCALE_STEPS,
   optimize: OPTIMIZE_STEPS,
   "test-angles": ANGLES_STEPS,
+  "campaign-dive": ["campaign-dive"], // single-step
 };
 
 /** Per-kind visible step rail. */
@@ -123,6 +133,8 @@ export const VISIBLE_STEPS_BY_KIND: Record<WorkflowKind, readonly WorkflowStep[]
   scale: SCALE_STEPS.filter((s) => s !== "done"),
   optimize: OPTIMIZE_STEPS.filter((s) => s !== "done"),
   "test-angles": ANGLES_STEPS.filter((s) => s !== "done"),
+  // Single-step flow — no rail.
+  "campaign-dive": [],
 };
 
 export type WorkflowBudget = {
@@ -200,8 +212,35 @@ export type DiagnosticWorkflow = {
   planApproved: boolean;
 };
 
+/**
+ * Campaign-dive workflow — single-step surface that opens chat-on-
+ * left + campaign-detail-on-right when the user clicks "Spot it" on
+ * a campaign / ad-set / ad row. The right pane is a read-only
+ * campaign brief with quick-action buttons (pause, scale, optimize,
+ * open on Meta); the left pane is the standard chat for asking Spot
+ * about the campaign.
+ */
+export type CampaignDiveWorkflow = {
+  kind: "campaign-dive";
+  step: WorkflowStep; // always "campaign-dive"
+  productId: string;
+  productName: string;
+  /** Campaign / ad-set / ad ID this dive is scoped to. */
+  entityId: string;
+  /** Display name of the entity. */
+  entityName: string;
+  /** Entity tier — controls which actions are available. */
+  entityTier: "campaign" | "adset" | "ad";
+  channel: "Meta" | "Google";
+  metaUrl: string;
+  startedAt: number;
+};
+
 /** Any workflow currently active in the Spot store. */
-export type SpotWorkflow = LaunchWorkflow | DiagnosticWorkflow;
+export type SpotWorkflow =
+  | LaunchWorkflow
+  | DiagnosticWorkflow
+  | CampaignDiveWorkflow;
 
 export const EMPTY_APPROVALS: WorkflowApprovals = {
   personaIds: [],
@@ -971,6 +1010,9 @@ export function stepIntroMessage(
   step: WorkflowStep,
   w: SpotWorkflow,
 ): SpotMessage | null {
+  // Campaign-dive has no scripted intro — chat is seeded directly in
+  // startCampaignDive · skip the intro lookup.
+  if (w.kind === "campaign-dive") return null;
   // Extended-flow steps (scale / optimize / test-angles) have their own
   // intro copy — dispatch to extended-flows for anything not in the
   // launch flow's switch below.

@@ -37,6 +37,7 @@ import {
   LaunchBuildingStep,
   LaunchReviewStep,
 } from "@/components/spot/workflow/launch-build-steps";
+import { CampaignDiveStep } from "@/components/spot/workflow/campaign-dive-step";
 import { SpotMark } from "@/components/spot/spot-mark";
 import { SpotLoader, SpotFullscreen } from "@/components/spot/spot-loader";
 import { PRODUCTS } from "@/lib/products-data";
@@ -71,6 +72,7 @@ const STEP_ICONS: Record<WorkflowStep, typeof Users> = {
   "ang-clarify": ChartPie,
   "ang-plan": Sparkles,
   "ang-live": ImageIcon,
+  "campaign-dive": Megaphone,
   // Shared
   done: PartyPopper,
 };
@@ -116,7 +118,9 @@ export function WorkflowPane() {
         ? "Optimizing"
         : workflow.kind === "test-angles"
           ? "Testing angles ·"
-          : "Launching ·";
+          : workflow.kind === "campaign-dive"
+            ? "Spot it ·"
+            : "Launching ·";
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -222,6 +226,10 @@ function StepBody({ workflow }: { workflow: SpotWorkflow }) {
     );
   }
 
+  // Campaign-dive has its own single-step canvas.
+  if (workflow.kind === "campaign-dive") {
+    return <CampaignDiveStep workflow={workflow} />;
+  }
   // Diagnostic flows (scale / optimize / test-angles) have their own
   // step components — dispatch to DiagnosticStep which knows how to
   // render any of their step keys.

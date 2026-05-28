@@ -240,7 +240,15 @@ export default function SpotPage() {
             <div className="flex-1 min-w-0">
               <div className="text-[12.5px] font-semibold leading-tight">Spot</div>
               <div className="text-[10.5px] text-text-tertiary leading-tight truncate">
-                Launching · {workflow.productName}
+                {workflow.kind === "scale"
+                  ? `Scaling · ${workflow.productName}`
+                  : workflow.kind === "optimize"
+                    ? `Optimizing · ${workflow.productName}`
+                    : workflow.kind === "test-angles"
+                      ? `Angle test · ${workflow.productName}`
+                      : workflow.kind === "campaign-dive"
+                        ? `Spot it · ${workflow.entityName}`
+                        : `Launching · ${workflow.productName}`}
               </div>
             </div>
             {!canvasOpen && (
@@ -1029,9 +1037,10 @@ function WorkflowParkBanner({
         </div>
         <div className="relative">
           <div className="flex items-start gap-3 mb-3">
-            <div className="relative w-9 h-9 flex-shrink-0">
-              <SpotMark size={22} className="spot-breath absolute inset-0 m-auto" />
-              <div className="absolute inset-0 rounded-full border-2 border-dashed border-border-subtle animate-[spin_4s_linear_infinite]" />
+            {/* Orbiting Spot — matches the in-canvas loader so the
+                user sees a consistent "working" signal everywhere. */}
+            <div className="flex-shrink-0 flex items-center justify-center w-12 h-12">
+              <SpotLoader mode="orbit" size={20} className="!gap-0" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 mb-0.5">

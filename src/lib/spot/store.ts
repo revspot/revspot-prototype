@@ -7,6 +7,7 @@ import {
   nextStepFor,
   stepIntroMessage,
   STEP_TOOL_CALL,
+  type CampaignDiveWorkflow,
   type DiagnosticWorkflow,
   type LaunchWorkflow,
   type SpotWorkflow,
@@ -61,6 +62,17 @@ type PanelState = {
   startOptimizeFlow: (product: { id: string; name: string }) => void;
   /** Start the Test New Angles workflow against an existing product. */
   startTestAnglesFlow: (product: { id: string; name: string }) => void;
+  /** Start the campaign-dive surface · chat-left + campaign-detail right.
+   *  Called by the "Spot it" button on campaign / ad-set / ad rows. */
+  startCampaignDive: (entity: {
+    id: string;
+    name: string;
+    tier: "campaign" | "adset" | "ad";
+    productId: string;
+    productName: string;
+    channel: "Meta" | "Google";
+    metaUrl: string;
+  }) => void;
   /** Advance the workflow to the next step + seed a Spot narration message. */
   advanceWorkflow: (narration?: string) => void;
   /** Jump to a specific step (used for "edit a previous step"). */
@@ -562,6 +574,47 @@ export const useSpotStore = create<PanelState>((set) => ({
     });
   },
 
+  startCampaignDive: (entity) => {
+    // Open the chat + canvas split-screen with the campaign in focus.
+    // The chat seeds with a short framing message so the user can start
+    // asking immediately ("why is CPL up?", "should I pause this?").
+    set(() => ({
+      open: true,
+      maximized: false,
+      canvasOpen: true,
+      viewHomeOverride: false,
+      scope: {
+        kind: "campaign",
+        label: entity.name,
+        target: entity.id,
+      },
+      pendingQuery: null,
+      workflow: {
+        kind: "campaign-dive",
+        step: "campaign-dive",
+        productId: entity.productId,
+        productName: entity.productName,
+        entityId: entity.id,
+        entityName: entity.name,
+        entityTier: entity.tier,
+        channel: entity.channel,
+        metaUrl: entity.metaUrl,
+        startedAt: Date.now(),
+      },
+      thread: [
+        {
+          role: "spot",
+          parts: [
+            {
+              type: "text",
+              text: `Looking at **${entity.name}** on the right. Ask me anything — why a metric moved, whether to pause, what to scale — or use the quick actions on the canvas.`,
+            },
+          ],
+        },
+      ],
+    }));
+  },
+
   advanceWorkflow: (narration) =>
     set((s) => {
       if (!s.workflow) return {};
@@ -593,6 +646,10 @@ export const useSpotStore = create<PanelState>((set) => ({
             approvals = { ...current, personaIds: existing };
           }
           return { ...s.workflow, step: upcoming, approvals };
+        }
+        // Campaign-dive is single-step — no advancement state to track.
+        if (s.workflow.kind === "campaign-dive") {
+          return { ...s.workflow, step: upcoming };
         }
         // Diagnostic flows — when advancing from `plan` to `live`,
         // flip planApproved so the live canvas knows the user signed
@@ -709,7 +766,13 @@ export const useSpotStore = create<PanelState>((set) => ({
 
   setClarifyAnswer: (questionId, value) =>
     set((s) => {
-      if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
+      // Only diagnostic flows have clarifyAnswers.
+      if (
+        !s.workflow ||
+        s.workflow.kind === "launch-campaign" ||
+        s.workflow.kind === "campaign-dive"
+      )
+        return {};
       return {
         workflow: {
           ...s.workflow,
@@ -720,7 +783,12 @@ export const useSpotStore = create<PanelState>((set) => ({
 
   primeClarifyDefaults: (defaults) =>
     set((s) => {
-      if (!s.workflow || s.workflow.kind === "launch-campaign") return {};
+      if (
+        !s.workflow ||
+        s.workflow.kind === "launch-campaign" ||
+        s.workflow.kind === "campaign-dive"
+      )
+        return {};
       // Don't overwrite anything the user has already set — only fill blanks.
       // CRITICAL: bail out early if no blanks remain. The caller's useEffect
       // can fire on every render (the questions array is a fresh ref each

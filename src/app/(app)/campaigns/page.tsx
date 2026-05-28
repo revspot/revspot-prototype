@@ -23,6 +23,7 @@
 // And on the right edge: Global date range (conventional placement).
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   ChevronRight,
@@ -270,7 +271,21 @@ type DateRange = (typeof DATE_RANGES)[number]["key"];
 type ChannelFilterValue = "all" | "Meta" | "Google";
 
 export default function CampaignsPage() {
-  const askSpot = useSpotStore((s) => s.askSpot);
+  const router = useRouter();
+  const startCampaignDive = useSpotStore((s) => s.startCampaignDive);
+  // Open chat-left + campaign-on-right Spot dive for any entity tier.
+  const openSpotIt = (entity: {
+    id: string;
+    name: string;
+    tier: "campaign" | "adset" | "ad";
+    productId: string;
+    productName: string;
+    channel: "Meta" | "Google";
+    metaUrl: string;
+  }) => {
+    startCampaignDive(entity);
+    router.push("/spot");
+  };
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [productId, setProductId] = useState<"all" | string>("all");
@@ -441,7 +456,7 @@ export default function CampaignsPage() {
               isAdsetExpanded={(id) => !!expanded[id]}
               onToggle={() => toggle(c.id)}
               onToggleAdset={(id) => toggle(id)}
-              askSpot={askSpot}
+              openSpotIt={openSpotIt}
             />
           ))
         )}
@@ -779,6 +794,18 @@ function TableHeader({
 
 /* ─── Rows ─────────────────────────────────────────────────────── */
 
+/** Callback to open the Spot-it dive for a given entity (campaign /
+ *  ad-set / ad). Passed down through every row component. */
+type OpenSpotIt = (entity: {
+  id: string;
+  name: string;
+  tier: "campaign" | "adset" | "ad";
+  productId: string;
+  productName: string;
+  channel: "Meta" | "Google";
+  metaUrl: string;
+}) => void;
+
 function CampaignRow({
   c,
   metrics,
@@ -787,7 +814,7 @@ function CampaignRow({
   isAdsetExpanded,
   onToggle,
   onToggleAdset,
-  askSpot,
+  openSpotIt,
 }: {
   c: EdTechCampaign;
   metrics: MetricKey[];
@@ -796,7 +823,7 @@ function CampaignRow({
   isAdsetExpanded: (id: string) => boolean;
   onToggle: () => void;
   onToggleAdset: (id: string) => void;
-  askSpot: (q: string) => void;
+  openSpotIt: OpenSpotIt;
 }) {
   return (
     <>
@@ -812,8 +839,16 @@ function CampaignRow({
           metaUrl={c.metaUrl}
           expanded={expanded}
           onToggle={onToggle}
-          onAskSpot={() =>
-            askSpot(`Edit campaign "${c.name}" — diagnose and propose the change, then apply on Meta.`)
+          onSpotIt={() =>
+            openSpotIt({
+              id: c.id,
+              name: c.name,
+              tier: "campaign",
+              productId: c.productId,
+              productName: c.productName,
+              channel: c.channel,
+              metaUrl: c.metaUrl,
+            })
           }
         />
         {metrics.map((k) => {
@@ -834,12 +869,12 @@ function CampaignRow({
           <AdSetRow
             key={a.id}
             a={a}
-            channel={c.channel}
+            parent={c}
             metrics={metrics}
             colTemplate={colTemplate}
             expanded={isAdsetExpanded(a.id)}
             onToggle={() => onToggleAdset(a.id)}
-            askSpot={askSpot}
+            openSpotIt={openSpotIt}
           />
         ))}
     </>
@@ -848,20 +883,20 @@ function CampaignRow({
 
 function AdSetRow({
   a,
-  channel,
+  parent,
   metrics,
   colTemplate,
   expanded,
   onToggle,
-  askSpot,
+  openSpotIt,
 }: {
   a: EdTechAdSet;
-  channel: EdTechCampaign["channel"];
+  parent: EdTechCampaign;
   metrics: MetricKey[];
   colTemplate: string;
   expanded: boolean;
   onToggle: () => void;
-  askSpot: (q: string) => void;
+  openSpotIt: OpenSpotIt;
 }) {
   return (
     <>
@@ -872,12 +907,22 @@ function AdSetRow({
         <StatusDot status={a.status} />
         <NameCell
           name={a.name}
-          channel={channel}
+          channel={parent.channel}
           sub={`Ad set · ${a.ads.length} ad${a.ads.length === 1 ? "" : "s"}`}
           metaUrl={a.metaUrl}
           expanded={expanded}
           onToggle={onToggle}
-          onAskSpot={() => askSpot(`Adjust ad set "${a.name}" — audience or schedule. Apply on Meta when ready.`)}
+          onSpotIt={() =>
+            openSpotIt({
+              id: a.id,
+              name: a.name,
+              tier: "adset",
+              productId: parent.productId,
+              productName: parent.productName,
+              channel: parent.channel,
+              metaUrl: a.metaUrl,
+            })
+          }
           indent={1}
           dense
         />
@@ -896,7 +941,14 @@ function AdSetRow({
       </div>
       {expanded &&
         a.ads.map((ad) => (
-          <AdRow key={ad.id} ad={ad} metrics={metrics} colTemplate={colTemplate} askSpot={askSpot} />
+          <AdRow
+            key={ad.id}
+            ad={ad}
+            parent={parent}
+            metrics={metrics}
+            colTemplate={colTemplate}
+            openSpotIt={openSpotIt}
+          />
         ))}
     </>
   );
@@ -904,14 +956,16 @@ function AdSetRow({
 
 function AdRow({
   ad,
+  parent,
   metrics,
   colTemplate,
-  askSpot,
+  openSpotIt,
 }: {
   ad: EdTechAd;
+  parent: EdTechCampaign;
   metrics: MetricKey[];
   colTemplate: string;
-  askSpot: (q: string) => void;
+  openSpotIt: OpenSpotIt;
 }) {
   const KIcon = KIND_ICON[ad.kind];
   return (
@@ -934,9 +988,17 @@ function AdRow({
           >
             <ArrowUpRight size={11} strokeWidth={1.8} />
           </a>
-          <EditWithSpotButton
+          <SpotItButton
             onClick={() =>
-              askSpot(`Swap creative or copy on ad "${ad.name}". Propose and apply on Meta.`)
+              openSpotIt({
+                id: ad.id,
+                name: ad.name,
+                tier: "ad",
+                productId: parent.productId,
+                productName: parent.productName,
+                channel: parent.channel,
+                metaUrl: ad.metaUrl,
+              })
             }
             dense
           />
@@ -973,13 +1035,11 @@ function StatusDot({ status }: { status: EdTechCampaignStatus }) {
 }
 
 /**
- * "Edit with Spot" — a filled black pill carrying the SpotMark.
- * Distinguished enough that users notice they can ask Spot to change
- * anything; small enough that it doesn't compete with row metrics.
- *
- * Replaces the earlier ghost-style button, which was easy to miss.
+ * "Spot it" — filled black pill with the SpotMark. Opens the dive
+ * surface (chat-on-left + campaign-on-right) where the user can dig
+ * deeper, scale, pause, or optimise via Spot.
  */
-function EditWithSpotButton({
+function SpotItButton({
   onClick,
   dense,
 }: {
@@ -993,10 +1053,10 @@ function EditWithSpotButton({
       className={`inline-flex items-center gap-1 rounded-[5px] bg-[#111] text-[#FAFAF8] hover:bg-black font-medium flex-shrink-0 ${
         dense ? "h-[18px] px-1.5 text-[10px]" : "h-[20px] px-1.5 text-[10.5px]"
       }`}
-      title="Ask Spot to edit"
+      title="Open chat + campaign view to dig deeper"
     >
       <SpotMark size={dense ? 9 : 10} />
-      Edit
+      Spot it
     </button>
   );
 }
@@ -1008,7 +1068,7 @@ function NameCell({
   metaUrl,
   expanded,
   onToggle,
-  onAskSpot,
+  onSpotIt,
   indent = 0,
   dense,
 }: {
@@ -1018,7 +1078,7 @@ function NameCell({
   metaUrl: string;
   expanded: boolean;
   onToggle: () => void;
-  onAskSpot: () => void;
+  onSpotIt: () => void;
   indent?: number;
   dense?: boolean;
 }) {
@@ -1054,7 +1114,7 @@ function NameCell({
           >
             <ArrowUpRight size={11} strokeWidth={1.8} />
           </a>
-          <EditWithSpotButton onClick={onAskSpot} dense={dense} />
+          <SpotItButton onClick={onSpotIt} dense={dense} />
         </div>
         <div className={`text-text-tertiary truncate ${dense ? "text-[10.5px]" : "text-[11px]"} mt-0.5`}>
           {sub}
