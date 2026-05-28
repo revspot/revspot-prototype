@@ -118,6 +118,11 @@ type PanelState = {
    *  If 2 files are already open → replaces the second one. Opens
    *  the canvas if it was collapsed. */
   openCanvasFile: (file: CanvasFile) => void;
+  /** Replace the entire canvas with a single pane showing this file.
+   *  Used for workflow step transitions (kickoff → plan etc.) so
+   *  advancing the workflow swaps the active file rather than
+   *  stacking it as a second pane. */
+  focusCanvasFile: (file: CanvasFile) => void;
   /** Close a single pane. If it was the last pane → canvas collapses. */
   closeCanvasFile: (file: CanvasFile) => void;
   /** Park the workflow and render the homepage (workflow stays alive). */
@@ -598,18 +603,11 @@ export const useSpotStore = create<PanelState>((set) => ({
   // delay synthesise the memory and advance to kickoff. From the
   // user's POV it feels like Spot just learned about the product.
   startDeepResearch: (productName, attachedFiles = []) => {
-    // Two phases, two tool-call rows in chat:
-    //   1. Deep Research Agent (~5s) — canvas shows the research loader
-    //      with cycling status (Crawling site, pulling competitor data,
-    //      checking audience graph, …)
-    //   2. Memory Builder Agent (~3s) — canvas swaps to the "Building
-    //      memory" loader (drafting tagline, writing brief, locking
-    //      USPs, …). Then the memory reveals.
-    //
-    // kickoffReady gates the second→third transition: false while
-    // building, true once memory is written.
+    // Single phase: the Deep Research Agent crawls, parses, AND writes
+    // the memory itself. No separate "Memory Builder" tool-call —
+    // it's the same agent doing the work end-to-end. After ~8s the
+    // memory reveals on the right canvas.
     const researchCallId = `tc-research-${Date.now()}`;
-    const memoryCallId = `tc-memory-${Date.now()}`;
     const hasFiles = attachedFiles.length > 0;
     // Append (not replace) the thread so any prior turn — the user's
     // form submission, intake tool-call, or "launch a campaign for X"
@@ -660,49 +658,11 @@ export const useSpotStore = create<PanelState>((set) => ({
       ],
     }));
 
-    // ── Phase 1 → 2 · Research done, start Building Memory ──────
-    // After ~5s, flip step to "kickoff" (still with kickoffReady=false
-    // so the canvas shows the "Building memory" loader) and start the
-    // second tool-call in chat.
-    setTimeout(() => {
-      set((s) => {
-        if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
-        const updatedThread = s.thread.map((m) => {
-          if (m.role !== "spot") return m;
-          return {
-            ...m,
-            parts: m.parts.map((p) =>
-              p.type === "tool-call" && p.id === researchCallId
-                ? { ...p, status: "done" as const }
-                : p,
-            ),
-          };
-        });
-        const buildMsg: SpotMessage = {
-          role: "spot",
-          parts: [
-            {
-              type: "text",
-              text: `Research is in. Now committing it to memory — drafting the brief, locking pricing + offers, writing the USPs.`,
-            },
-            {
-              type: "tool-call",
-              id: memoryCallId,
-              agent: "Memory Builder Agent",
-              detail:
-                "Composing tagline · structured brief · pricing · offers · USPs · do-not-mention list.",
-              status: "running",
-            },
-          ],
-        };
-        return {
-          workflow: { ...s.workflow, step: "kickoff" },
-          thread: [...updatedThread, buildMsg],
-        };
-      });
-    }, 5000);
-
-    // ── Phase 2 → 3 · Building done, reveal memory + kickoff CTA ──
+    // ── Research done · flip to kickoff, reveal memory, ship CTA ──
+    // After ~8s, flip the deep-research tool-call to done, transition
+    // step to "kickoff" with researchedMemory populated, append the
+    // kickoff intro message with the step-cta. The single tool-call
+    // does it all — no separate Memory Builder.
     setTimeout(() => {
       set((s) => {
         if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
@@ -756,14 +716,14 @@ export const useSpotStore = create<PanelState>((set) => ({
           researchedMemory: researched,
           kickoffReady: true,
         };
-        // Flip the Memory Builder tool-call to done + append the kickoff
-        // intro with the step-cta.
+        // Flip the Deep Research tool-call to done + append the kickoff
+        // intro with the step-cta. Single agent does the whole arc.
         const updatedThread = s.thread.map((m) => {
           if (m.role !== "spot") return m;
           return {
             ...m,
             parts: m.parts.map((p) =>
-              p.type === "tool-call" && p.id === memoryCallId
+              p.type === "tool-call" && p.id === researchCallId
                 ? { ...p, status: "done" as const }
                 : p,
             ),
@@ -791,7 +751,7 @@ export const useSpotStore = create<PanelState>((set) => ({
         };
         return { workflow: nextWorkflow, thread: [...updatedThread, kickoff] };
       });
-    }, 8500); // 5s research + 3.5s building
+    }, 8000); // Single agent does the whole research + memory write
   },
 
   // Diagnostic workflows — Scale, Optimize, Test-Angles. They all share
@@ -1083,6 +1043,9 @@ export const useSpotStore = create<PanelState>((set) => ({
       // 2 panes → replace the second one (max 2 panes).
       return { canvasOpen: true, canvasFiles: [s.canvasFiles[0], file] };
     }),
+
+  focusCanvasFile: (file) =>
+    set(() => ({ canvasOpen: true, canvasFiles: [file] })),
 
   closeCanvasFile: (file) =>
     set((s) => {

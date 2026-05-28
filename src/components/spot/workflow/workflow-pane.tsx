@@ -143,15 +143,18 @@ export function WorkflowPane() {
   const closeCanvasFile = useSpotStore((s) => s.closeCanvasFile);
   const toggleCanvas = useSpotStore((s) => s.toggleCanvas);
   const exitWorkflow = useSpotStore((s) => s.exitWorkflow);
-  const openCanvasFile = useSpotStore((s) => s.openCanvasFile);
+  const focusCanvasFile = useSpotStore((s) => s.focusCanvasFile);
 
   // Auto-focus the most relevant file when the workflow step changes.
-  // If the user already has it open we no-op; otherwise we open it
-  // (which either adds it as a second pane or replaces the latest).
+  // We REPLACE the canvas (not add a second pane) — advancing from
+  // memory → plan should swap the file in place, the way Claude
+  // Code's preview button does, not stack two panes side-by-side.
+  // The user can still manually open a second pane from the picker.
   useEffect(() => {
     if (!workflow) return;
     const target = defaultFileForStep(workflow.step);
-    if (!canvasFiles.includes(target)) openCanvasFile(target);
+    if (canvasFiles.length === 1 && canvasFiles[0] === target) return;
+    focusCanvasFile(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflow?.step]);
 
@@ -613,6 +616,79 @@ function MemoryFileView({
   );
 }
 
+/** Cycling labels for the plan-building loader. Same shape as the
+ *  deep-research labels but framed around plan composition. */
+const PLAN_BUILDING_LABELS = [
+  "Reading the product brief from memory",
+  "Pulling persona signals from the audience graph",
+  "Drafting media mix · Meta · Google · WhatsApp",
+  "Composing creative angles per persona",
+  "Sequencing the 14-day rollout",
+  "Locking budget allocations",
+];
+
+/** Hard-coded launch plan template for brand-new products. Substitutes
+ *  the product name everywhere so the canvas isn't blank after the
+ *  user clicks "show me the plan". Themed for an EdTech course like
+ *  Guyju's Spoken English — applies cleanly to any new product the
+ *  user spins up in this demo. */
+function buildNewProductPlanMd(productName: string): string {
+  return `# ${productName} · Launch plan
+
+_Drafted just now · 14-day rollout · Conservative experiment_
+
+A small-budget, persona-led launch to learn what wins before we scale. One campaign per persona, three creative angles each, tight feedback loop on CPL and qualification.
+
+## Phase 1 · Day 1-2 · Setup
+
+- Provision pixel + Conversion API for the brand site
+- Build 3 landing pages — one per persona
+- Wire Meta lead forms + WhatsApp click-to-chat
+- Connect CRM webhook for real-time lead delivery
+- Brief Voice Agent for outbound follow-ups
+
+## Phase 2 · Day 3-7 · Launch
+
+- Go live with 3 Meta campaigns · 1 per persona · ₹500/day each
+- Spin up Google Search on high-intent keywords · ₹400/day
+- Activate Google Discover for top-of-funnel reach · ₹300/day
+- Monitor CPL, qualification rate, and creative engagement daily
+
+## Phase 3 · Day 8-14 · Optimize
+
+- Pause ad sets with CPL > 2x target
+- Scale winners by 30% per 48h once CPL stabilises
+- Promote top creatives to broader audiences
+- Refresh fatigued creatives (frequency > 2.5)
+
+## Phase 4 · Day 15+ · Scale
+
+- Expand to 5 ad sets per persona on the winning angle
+- Test new persona variants from the audience graph
+- Open WhatsApp Business outreach to nurture cold leads
+- Brief the Voice Agent for warm-lead follow-ups
+
+## Budget
+
+- **Meta** · ₹1,500/day · ₹21,000 over 14 days
+- **Google Search** · ₹400/day · ₹5,600 over 14 days
+- **Google Discover** · ₹300/day · ₹4,200 over 14 days
+- **Total · 14 days** · ₹30,800
+- **Daily cap** · ₹2,200
+
+## Risks to monitor
+
+- Audience saturation in the top persona
+- Creative fatigue past 14 days
+- Landing page bounce > 60%
+- Lead-form drop-off > 40%
+
+---
+
+_Plan generated · Awaiting your approval · Edit any block in chat_
+`;
+}
+
 function PlanFileView({
   workflow,
   buildingOverlay,
@@ -621,8 +697,58 @@ function PlanFileView({
   buildingOverlay: boolean;
 }) {
   const files = getProductFiles(workflow);
-  // New product · no plan yet. Show a calm empty state with a
-  // soft icon + one-line explanation instead of bare text.
+
+  // While Spot is "generating" the plan (step transitioned to
+  // launch-plan and tool-call is still running), show the cycling
+  // loader. The local timer matches the launch-plan tool-call
+  // delayMs (5.6s) so the loader stays up for exactly the agent run.
+  const [planBuilding, setPlanBuilding] = useState(
+    workflow.kind === "launch-campaign" && workflow.step === "launch-plan",
+  );
+  useEffect(() => {
+    if (
+      workflow.kind === "launch-campaign" &&
+      workflow.step === "launch-plan"
+    ) {
+      setPlanBuilding(true);
+      const id = setTimeout(() => setPlanBuilding(false), 5600);
+      return () => clearTimeout(id);
+    }
+    setPlanBuilding(false);
+  }, [workflow?.step, workflow?.kind]);
+
+  if (
+    planBuilding &&
+    workflow.kind === "launch-campaign"
+  ) {
+    return (
+      <div className="h-full flex items-center justify-center px-6 py-12">
+        <SpotFullscreen
+          title={`Drafting the plan for ${workflow.productName}`}
+          messages={PLAN_BUILDING_LABELS}
+          size={64}
+        />
+      </div>
+    );
+  }
+
+  // New product (no saved files) post-build · render the generic
+  // template. Even brand-new products get a real plan to read,
+  // not a "No plan yet" placeholder.
+  if (!files && workflow.kind === "launch-campaign") {
+    const md = buildNewProductPlanMd(workflow.productName);
+    return (
+      <div className="relative">
+        <div className="px-6 py-5 max-w-[760px]">
+          <Markdown source={md} />
+        </div>
+        {buildingOverlay && <BuildingOverlay label="Spot is drafting the plan…" />}
+      </div>
+    );
+  }
+
+  // Other workflow kinds without files (campaign-dive etc.) keep
+  // the calm empty state.
   if (!files) {
     return (
       <div className="relative h-full">
