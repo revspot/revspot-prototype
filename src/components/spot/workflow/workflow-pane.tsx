@@ -510,12 +510,33 @@ export function ChatHeaderFilePicker({ compact = false }: { compact?: boolean })
  */
 function AwaitingInputCanvas() {
   return (
-    <div className="h-full flex flex-col items-center justify-center px-8 py-16 text-center">
-      <SpotLoader mode="orbit" size={48} className="!gap-0" />
-      <div className="text-section-header text-text-primary mt-5">
+    <div
+      className="h-full flex flex-col items-center justify-center px-8 py-16 text-center"
+      style={{ background: "#0A0A09" }}
+    >
+      <div className="relative mb-6">
+        <div
+          aria-hidden
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(201, 168, 106, 0.32) 0%, transparent 65%)",
+            filter: "blur(14px)",
+            transform: "scale(1.6)",
+          }}
+        />
+        <SpotLoader mode="orbit" size={56} className="!gap-0 relative" />
+      </div>
+      <div
+        className="text-[18px] font-semibold tracking-tight"
+        style={{ color: "#F5F4EF" }}
+      >
         Awaiting your input
       </div>
-      <div className="text-[12.5px] text-text-secondary mt-1.5 max-w-[340px] leading-relaxed">
+      <div
+        className="text-[13px] mt-2 max-w-[360px] leading-relaxed"
+        style={{ color: "#A8A8A0" }}
+      >
         Drop the basics in the form on the left. As soon as you submit, I&apos;ll
         start research and write the product memory into this workspace.
       </div>
@@ -2573,19 +2594,26 @@ type DummyCreative = {
   src?: string;
 };
 
+// All creative thumbnails are 1:1 (square) by spec — Spot proposes the
+// concept on a square hero, and the user opens a "View all sizes"
+// preview to see how the same idea maps to 4:5 / 9:16 / 16:9.
+// Real PNGs live in /public/assets/creatives — parent-NN and
+// student-NN are the eight files the user dropped in for the new
+// product launch flow. Working-professional cards still fall back to
+// the gradient placeholder until that persona has real assets.
 const DUMMY_CREATIVES: DummyCreative[] = [
-  { id: "c01", title: "Speak confidently in 12 weeks", angle: "Outcome-led", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 28, src: "/assets/creatives/c01.png" },
-  { id: "c02", title: "Live cohort · Native trainers", angle: "Authority", personaName: "Working professional", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 42, src: "/assets/creatives/c02.png" },
-  { id: "c03", title: "Real conversation drills", angle: "Method", personaName: "Working professional", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 56, src: "/assets/creatives/c03.png" },
-  { id: "c04", title: "Crack any interview · 6 weeks", angle: "Outcome-led", personaName: "College student", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 200, src: "/assets/creatives/c04.png" },
-  { id: "c05", title: "From hesitation to fluent", angle: "Transformation", personaName: "College student", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 215, src: "/assets/creatives/c05.png" },
-  { id: "c06", title: "Mock interviews · weekly", angle: "Method", personaName: "College student", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 188, src: "/assets/creatives/c06.png" },
-  { id: "c07", title: "Help your child speak with confidence", angle: "Emotional", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 340, src: "/assets/creatives/c07.png" },
-  { id: "c08", title: "Trusted by 12,000+ parents", angle: "Social proof", personaName: "Parent · buying for child", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 320, src: "/assets/creatives/c08.png" },
-  { id: "c09", title: "School-confidence in 8 weeks", angle: "Outcome-led", personaName: "Parent · buying for child", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 300, src: "/assets/creatives/c09.png" },
-  { id: "c10", title: "Try one free class", angle: "Trial-led", personaName: "Working professional", channel: "YouTube", format: "16:9", sizes: ["16:9"], kind: "video", state: "ready", hue: 12, src: "/assets/creatives/c10.png" },
-  { id: "c11", title: "Speak in 8 weeks · ₹0 risk", angle: "Risk-reversal", personaName: "College student", channel: "YouTube", format: "16:9", sizes: ["16:9"], kind: "video", state: "ready", hue: 230, src: "/assets/creatives/c11.png" },
-  { id: "c12", title: "Built for working pros", angle: "Positioning", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1"], kind: "carousel", state: "draft", hue: 70, src: "/assets/creatives/c12.png" },
+  { id: "c01", title: "Speak confidently in 12 weeks", angle: "Outcome-led", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 28, src: undefined },
+  { id: "c02", title: "Live cohort · Native trainers", angle: "Authority", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 42, src: undefined },
+  { id: "c03", title: "Real conversation drills", angle: "Method", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1", "9:16"], kind: "video", state: "ready", hue: 56, src: undefined },
+  { id: "c04", title: "Crack any interview · 6 weeks", angle: "Outcome-led", personaName: "College student", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 200, src: "/assets/creatives/student-01.png" },
+  { id: "c05", title: "From hesitation to fluent", angle: "Transformation", personaName: "College student", channel: "Meta", format: "1:1", sizes: ["1:1", "9:16"], kind: "video", state: "ready", hue: 215, src: "/assets/creatives/student-02.png" },
+  { id: "c06", title: "Mock interviews · weekly", angle: "Method", personaName: "College student", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 188, src: "/assets/creatives/student-03.png" },
+  { id: "c07", title: "Help your child speak with confidence", angle: "Emotional", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 340, src: "/assets/creatives/parent-01.png" },
+  { id: "c08", title: "Trusted by 12,000+ parents", angle: "Social proof", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 320, src: "/assets/creatives/parent-02.png" },
+  { id: "c09", title: "School-confidence in 8 weeks", angle: "Outcome-led", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1", "9:16"], kind: "image", state: "ready", hue: 300, src: "/assets/creatives/parent-03.png" },
+  { id: "c10", title: "Try one free class", angle: "Trial-led", personaName: "Working professional", channel: "YouTube", format: "1:1", sizes: ["1:1", "16:9"], kind: "video", state: "ready", hue: 12, src: undefined },
+  { id: "c11", title: "Speak in 8 weeks · ₹0 risk", angle: "Risk-reversal", personaName: "College student", channel: "YouTube", format: "1:1", sizes: ["1:1", "16:9"], kind: "video", state: "ready", hue: 230, src: "/assets/creatives/student-04.png" },
+  { id: "c12", title: "Real-life parent confessions", angle: "Story", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1"], kind: "image", state: "ready", hue: 320, src: "/assets/creatives/parent-04.png" },
 ];
 
 const DUMMY_SEARCH_ADS: {
@@ -2826,35 +2854,40 @@ function CreativeCard({
           border: "1px solid #262623",
         }}
       >
-        {/* Always 1:1 thumbnail */}
+        {/* Always 1:1 thumbnail · real image when available, gradient
+            + overlay text fallback when not */}
         <div className="relative w-full" style={{ background: gradientBg }}>
           <div style={{ paddingTop: "100%" }} aria-hidden />
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-            {creative.src && (
-              <img
-                src={creative.src}
-                alt={creative.title}
-                className="absolute inset-0 w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
-            )}
-            <div className="relative z-10 px-2">
-              <div
-                className="text-[10px] uppercase tracking-wider font-semibold mb-1.5 drop-shadow-sm"
-                style={{ color: "rgba(255,255,255,0.88)" }}
-              >
-                {creative.angle}
-              </div>
-              <div
-                className="text-[13px] font-semibold leading-snug drop-shadow-sm"
-                style={{ color: "#FFFFFF" }}
-              >
-                {creative.title}
+          {creative.src && (
+            <img
+              src={creative.src}
+              alt={creative.title}
+              className="absolute inset-0 w-full h-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          )}
+          {/* Angle/title overlay · only shown when no real image so
+              we never paint text on top of the dropped-in PNG */}
+          {!creative.src && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+              <div className="relative z-10 px-2">
+                <div
+                  className="text-[10px] uppercase tracking-wider font-semibold mb-1.5 drop-shadow-sm"
+                  style={{ color: "rgba(255,255,255,0.88)" }}
+                >
+                  {creative.angle}
+                </div>
+                <div
+                  className="text-[13px] font-semibold leading-snug drop-shadow-sm"
+                  style={{ color: "#FFFFFF" }}
+                >
+                  {creative.title}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Kind badge (Video / Carousel) top-left */}
           {creative.kind !== "image" && (
@@ -3056,18 +3089,18 @@ function CreativeSizesModal({
                 >
                   <div className="relative w-full" style={{ background: gradientBg }}>
                     <div style={{ paddingTop: ratioFor(sz) }} aria-hidden />
+                    {creative.src && (
+                      <img
+                        src={creative.src}
+                        alt={creative.title}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    )}
+                    {!creative.src && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
-                      {creative.src && (
-                        <img
-                          src={creative.src}
-                          alt={creative.title}
-                          className="absolute inset-0 w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display =
-                              "none";
-                          }}
-                        />
-                      )}
                       <div className="relative z-10 px-1">
                         <div
                           className="text-[9px] uppercase tracking-wider font-semibold mb-1 drop-shadow-sm"
@@ -3083,6 +3116,7 @@ function CreativeSizesModal({
                         </div>
                       </div>
                     </div>
+                    )}
                     <div className="absolute top-1.5 left-1.5">
                       <span
                         className="inline-flex items-center h-5 px-1.5 rounded-full text-[10px] font-mono tabular"
