@@ -8,6 +8,7 @@ import {
   stepIntroMessage,
   STEP_TOOL_CALL,
   type CampaignDiveWorkflow,
+  type CanvasFile,
   type DiagnosticWorkflow,
   type LaunchWorkflow,
   type ProductSetupAnswers,
@@ -44,6 +45,12 @@ type PanelState = {
   // preserved when this is false — the user just gets the chat wider
   // so they can read uninterrupted, like collapsing Claude's preview.
   canvasOpen: boolean;
+  // Files currently open in the canvas. Length 0..2 — closing the
+  // last one hides the canvas. Order = left-to-right pane order.
+  // Drives the multi-pane canvas (Claude-style "open two files side
+  // by side"). The picker dropdown lives in the chat header so the
+  // user opens / focuses files from the same side they type on.
+  canvasFiles: CanvasFile[];
   // When a workflow is active but the user has navigated back to the
   // Spot homepage (via the "Spot home" button), this is true. The
   // workflow is preserved; we just render the home view. Setting back
@@ -63,6 +70,14 @@ type PanelState = {
   /** Attach files during product-setup. Mirrors the attachment as a
    *  user message in the chat. */
   attachProductSetupFiles: (fileNames: string[]) => void;
+  /** Submit the new-product modal · captures name + URL + files in one
+   *  shot, mirrors the input as a user message in chat, then triggers
+   *  deep research. Replaces the chat-driven Q&A for the first step. */
+  submitProductSetupForm: (data: {
+    name: string;
+    url?: string;
+    files?: string[];
+  }) => void;
   /** Spot doesn't recognise the product — fake-research it in real-time. */
   startDeepResearch: (productName: string, attachedFiles?: string[]) => void;
   /** Start the Scale workflow against an existing product. */
@@ -99,10 +114,26 @@ type PanelState = {
   setCanvasOpen: (open: boolean) => void;
   /** Convenience toggler used by the canvas open/close buttons. */
   toggleCanvas: () => void;
+  /** Open (or focus) a file in the canvas. If already open → no-op.
+   *  If 2 files are already open → replaces the second one. Opens
+   *  the canvas if it was collapsed. */
+  openCanvasFile: (file: CanvasFile) => void;
+  /** Replace the entire canvas with a single pane showing this file.
+   *  Used for workflow step transitions (kickoff → plan etc.) so
+   *  advancing the workflow swaps the active file rather than
+   *  stacking it as a second pane. */
+  focusCanvasFile: (file: CanvasFile) => void;
+  /** Close a single pane. If it was the last pane → canvas collapses. */
+  closeCanvasFile: (file: CanvasFile) => void;
   /** Park the workflow and render the homepage (workflow stays alive). */
   showHomeView: () => void;
   /** Resume the active workflow (homepage banner / past-chats click). */
   resumeWorkflow: () => void;
+  /** Set of step-CTA labels the user has already clicked in the
+   *  current workflow. We hide the button after click so the chat
+   *  doesn't render the same dark CTA next to the user's echo. */
+  clickedCtas: Set<string>;
+  markCtaClicked: (label: string) => void;
   /** Workspace-level WhatsApp Business connection state (for media-plan). */
   whatsAppConnected: boolean;
   connectWhatsApp: () => void;
@@ -149,6 +180,7 @@ function startDiagnostic(
     maximized: false,
     canvasOpen: true,
     viewHomeOverride: false,
+    clickedCtas: new Set<string>(),
     scope: { kind: "project", label: product.name, target: product.id },
     pendingQuery: null,
     workflow: {
@@ -214,7 +246,9 @@ export const useSpotStore = create<PanelState>((set) => ({
   toast: null,
   workflow: null,
   canvasOpen: true,
+  canvasFiles: ["memory"],
   viewHomeOverride: false,
+  clickedCtas: new Set<string>(),
   whatsAppConnected: false,
 
   askSpot: (query, scope) =>
@@ -240,6 +274,7 @@ export const useSpotStore = create<PanelState>((set) => ({
       maximized: false,
       canvasOpen: true,
       viewHomeOverride: false,
+      clickedCtas: new Set<string>(),
       scope: { kind: "project", label: project.name, target: project.id },
       pendingQuery: null,
       workflow: {
@@ -313,16 +348,21 @@ export const useSpotStore = create<PanelState>((set) => ({
     }, 4500);
   },
 
-  // Kicks off the chat-driven new-product flow. The right canvas
-  // becomes a display-only "Brief building" view; the left chat asks
-  // for name → url → files in sequence. Each user answer flows
-  // through handleProductSetupAnswer below and advances the stage.
-  startNewProductFlow: () =>
+  // Kicks off the new-product flow. The thread leads with a user
+  // bubble ("Let's start working on a new product.") so the
+  // conversation reads naturally from the top — Spot's response
+  // follows with the running intake tool-call. The inline question
+  // card slides into the thread ~1.4s later, after the tool-call
+  // resolves.
+  startNewProductFlow: () => {
+    const callId = `tc-form-${Date.now()}`;
     set(() => ({
       open: true,
       maximized: false,
       canvasOpen: true,
+      canvasFiles: ["memory"],
       viewHomeOverride: false,
+      clickedCtas: new Set<string>(),
       scope: { kind: "workspace", label: "New product" },
       pendingQuery: null,
       workflow: {
@@ -338,22 +378,95 @@ export const useSpotStore = create<PanelState>((set) => ({
         attachedVoiceAgentId: null,
         productSetupStage: "name",
         productSetupAnswers: {},
+        productSetupModalOpen: false,
       },
       thread: [
+        { role: "user", text: "Let's start working on a new product." },
         {
           role: "spot",
           parts: [
-            { type: "headline", text: "Let's set up a new product.", verdict: "info" },
             {
               type: "text",
               text:
-                "I'll fill the brief on the right as we talk · just answer here in chat. " +
-                "First — **what should I call it?**",
+                "Got it — spinning up a quick intake. Name, brand URL, and any files you have. " +
+                "I'll pull what I can and write the memory.",
+            },
+            {
+              type: "tool-call",
+              id: callId,
+              agent: "Spot",
+              detail: "preparing intake form…",
+              status: "running",
             },
           ],
         },
       ],
-    })),
+    }));
+
+    // After the fake delay, resolve the tool-call and open the
+    // drawer. The drawer's own mount-effect handles the slide-up.
+    setTimeout(() => {
+      set((s) => {
+        if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
+        const updatedThread = s.thread.map((m) => {
+          if (m.role !== "spot") return m;
+          return {
+            ...m,
+            parts: m.parts.map((p) =>
+              p.type === "tool-call" && p.id === callId
+                ? { ...p, status: "done" as const }
+                : p,
+            ),
+          };
+        });
+        return {
+          workflow: { ...s.workflow, productSetupModalOpen: true },
+          thread: updatedThread,
+        };
+      });
+    }, 1400);
+  },
+
+  // Modal submit — captures all three inputs at once. Mirrors the
+  // input as a single user message, then triggers deep research.
+  submitProductSetupForm: (data) => {
+    const trimmedName = data.name.trim();
+    if (!trimmedName) return;
+    const state = useSpotStore.getState();
+    const wf = state.workflow;
+    if (!wf || wf.kind !== "launch-campaign" || wf.step !== "product-setup") return;
+
+    const url = data.url?.trim() || undefined;
+    const files = data.files && data.files.length > 0 ? data.files : undefined;
+
+    const answers: ProductSetupAnswers = {
+      name: trimmedName,
+      url,
+      files: files ?? [],
+    };
+
+    const nextWorkflow: LaunchWorkflow = {
+      ...wf,
+      productName: trimmedName,
+      productSetupAnswers: answers,
+      productSetupStage: "ready",
+      productSetupModalOpen: false,
+    };
+
+    // The question card mirrors each answer as a user message as the
+    // user advances — no need to append a combined summary here.
+    // Just flip workflow state and let deep research take it from here.
+    set(() => ({
+      workflow: nextWorkflow,
+    }));
+
+    // Kick off deep research after a brief beat.
+    setTimeout(() => {
+      const cur = useSpotStore.getState();
+      if (cur.workflow?.step !== "product-setup") return;
+      cur.startDeepResearch(trimmedName, files ?? []);
+    }, 600);
+  },
 
   // Chat-driven product-setup Q&A · advances stage by stage. Each call
   // appends the user's answer as a chat message, stores the answer,
@@ -499,24 +612,16 @@ export const useSpotStore = create<PanelState>((set) => ({
   // delay synthesise the memory and advance to kickoff. From the
   // user's POV it feels like Spot just learned about the product.
   startDeepResearch: (productName, attachedFiles = []) => {
-    // Two phases, two tool-call rows in chat:
-    //   1. Deep Research Agent (~5s) — canvas shows the research loader
-    //      with cycling status (Crawling site, pulling competitor data,
-    //      checking audience graph, …)
-    //   2. Memory Builder Agent (~3s) — canvas swaps to the "Building
-    //      memory" loader (drafting tagline, writing brief, locking
-    //      USPs, …). Then the memory reveals.
-    //
-    // kickoffReady gates the second→third transition: false while
-    // building, true once memory is written.
+    // Single phase: the Deep Research Agent crawls, parses, AND writes
+    // the memory itself. No separate "Memory Builder" tool-call —
+    // it's the same agent doing the work end-to-end. After ~8s the
+    // memory reveals on the right canvas.
     const researchCallId = `tc-research-${Date.now()}`;
-    const memoryCallId = `tc-memory-${Date.now()}`;
     const hasFiles = attachedFiles.length > 0;
-    const fileSummary =
-      attachedFiles.length === 1
-        ? `“${attachedFiles[0]}”`
-        : `${attachedFiles.length} files (${attachedFiles.slice(0, 2).join(", ")}${attachedFiles.length > 2 ? ", …" : ""})`;
-    set(() => ({
+    // Append (not replace) the thread so any prior turn — the user's
+    // form submission, intake tool-call, or "launch a campaign for X"
+    // prompt — stays visible above the research narration.
+    set((s) => ({
       open: true,
       maximized: false,
       canvasOpen: true,
@@ -538,19 +643,15 @@ export const useSpotStore = create<PanelState>((set) => ({
         attachedVoiceAgentId: null,
       },
       thread: [
+        ...s.thread,
         {
           role: "spot",
           parts: [
             {
-              type: "headline",
-              text: `I haven't seen "${productName}" yet.`,
-              verdict: "info",
-            },
-            {
               type: "text",
               text: hasFiles
-                ? `I'll parse ${fileSummary} alongside the brand site, pull category signals from the open web, and check our audience graph — then write everything to product memory.`
-                : "Let me spin up the Deep Research Agent — I'll crawl the brand site, pull category signals from the open web, and check our audience graph, then write everything to product memory.",
+                ? `On it — dispatching the Deep Research Agent. Crawling the URL, parsing your ${attachedFiles.length} file${attachedFiles.length === 1 ? "" : "s"}, searching the open web, then writing everything to product memory.`
+                : `On it — dispatching the Deep Research Agent. Crawling the URL, searching the open web for category signals, then writing everything to product memory.`,
             },
             {
               type: "tool-call",
@@ -566,49 +667,11 @@ export const useSpotStore = create<PanelState>((set) => ({
       ],
     }));
 
-    // ── Phase 1 → 2 · Research done, start Building Memory ──────
-    // After ~5s, flip step to "kickoff" (still with kickoffReady=false
-    // so the canvas shows the "Building memory" loader) and start the
-    // second tool-call in chat.
-    setTimeout(() => {
-      set((s) => {
-        if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
-        const updatedThread = s.thread.map((m) => {
-          if (m.role !== "spot") return m;
-          return {
-            ...m,
-            parts: m.parts.map((p) =>
-              p.type === "tool-call" && p.id === researchCallId
-                ? { ...p, status: "done" as const }
-                : p,
-            ),
-          };
-        });
-        const buildMsg: SpotMessage = {
-          role: "spot",
-          parts: [
-            {
-              type: "text",
-              text: `Research is in. Now committing it to memory — drafting the brief, locking pricing + offers, writing the USPs.`,
-            },
-            {
-              type: "tool-call",
-              id: memoryCallId,
-              agent: "Memory Builder Agent",
-              detail:
-                "Composing tagline · structured brief · pricing · offers · USPs · do-not-mention list.",
-              status: "running",
-            },
-          ],
-        };
-        return {
-          workflow: { ...s.workflow, step: "kickoff" },
-          thread: [...updatedThread, buildMsg],
-        };
-      });
-    }, 5000);
-
-    // ── Phase 2 → 3 · Building done, reveal memory + kickoff CTA ──
+    // ── Research done · flip to kickoff, reveal memory, ship CTA ──
+    // After ~8s, flip the deep-research tool-call to done, transition
+    // step to "kickoff" with researchedMemory populated, append the
+    // kickoff intro message with the step-cta. The single tool-call
+    // does it all — no separate Memory Builder.
     setTimeout(() => {
       set((s) => {
         if (!s.workflow || s.workflow.kind !== "launch-campaign") return {};
@@ -620,6 +683,23 @@ export const useSpotStore = create<PanelState>((set) => ({
             { icon: "📚", label: "Curriculum", value: "Category-standard · benchmarked against top 3 incumbents" },
             { icon: "👨‍🏫", label: "Mentors", value: "Senior alumni · 1:1 monthly review" },
             { icon: "🎯", label: "Outcome", value: "Entrance-exam preparation track" },
+          ],
+          personas: [
+            {
+              name: "Working professional · Aspiring fluent speaker",
+              meta: "25-34 · tier-1/2 cities · LinkedIn-active",
+              pain: "Stalled career growth from English gap",
+            },
+            {
+              name: "College student · Interview prep",
+              meta: "18-24 · semi-urban · YouTube-heavy",
+              pain: "Campus placement interviews",
+            },
+            {
+              name: "Parent · Buying for child",
+              meta: "32-45 · tier-2/3 cities · WhatsApp + Facebook",
+              pain: "Child's school confidence",
+            },
           ],
           usps: [
             "Strongest category signal: live cohort + mentor-led delivery beats pure-recorded on retention.",
@@ -662,14 +742,14 @@ export const useSpotStore = create<PanelState>((set) => ({
           researchedMemory: researched,
           kickoffReady: true,
         };
-        // Flip the Memory Builder tool-call to done + append the kickoff
-        // intro with the step-cta.
+        // Flip the Deep Research tool-call to done + append the kickoff
+        // intro with the step-cta. Single agent does the whole arc.
         const updatedThread = s.thread.map((m) => {
           if (m.role !== "spot") return m;
           return {
             ...m,
             parts: m.parts.map((p) =>
-              p.type === "tool-call" && p.id === memoryCallId
+              p.type === "tool-call" && p.id === researchCallId
                 ? { ...p, status: "done" as const }
                 : p,
             ),
@@ -697,7 +777,7 @@ export const useSpotStore = create<PanelState>((set) => ({
         };
         return { workflow: nextWorkflow, thread: [...updatedThread, kickoff] };
       });
-    }, 8500); // 5s research + 3.5s building
+    }, 14000); // Deliberately slower so each loader stage gets to breathe
   },
 
   // Diagnostic workflows — Scale, Optimize, Test-Angles. They all share
@@ -808,9 +888,11 @@ export const useSpotStore = create<PanelState>((set) => ({
         // flip planApproved so the live canvas knows the user signed
         // off (drives the dashboard recommendation feed).
         const planApproved = upcoming.endsWith("-live") ? true : s.workflow.planApproved;
-        // Also reset `ready` on the plan step so the loader shows
-        // before the plan content reveals.
-        const ready = upcoming.endsWith("-plan") ? false : s.workflow.ready;
+        // Reset `ready` on EVERY diagnostic step transition so the
+        // dark Spot loader runs through each phase (analyze →
+        // clarify → plan → live). Without this, the loader only
+        // fires on the first step and subsequent phases land cold.
+        const ready = false;
         return { ...s.workflow, step: upcoming, planApproved, ready };
       })();
 
@@ -828,14 +910,11 @@ export const useSpotStore = create<PanelState>((set) => ({
           ],
         });
 
-        // Entering launch-building? Auto-park the user to the homepage so
-        // they see the "Spot working" card on /spot. The chat stays alive
-        // and full-width on the home view; the building canvas isn't
-        // useful by itself.
+        // Stay in the chat panel on launch-building — the new
+        // "Spot is working" drawer lives inline in the thread and
+        // gives the user View memory / Spot homepage actions. No
+        // forced redirect to the homepage anymore.
         const extraSetterPayload: Partial<PanelState> = {};
-        if (upcoming === "launch-building") {
-          extraSetterPayload.viewHomeOverride = true;
-        }
 
         // After the fake delay, flip the tool-call to done + append the
         // step intro. Step itself already advanced.
@@ -967,10 +1046,54 @@ export const useSpotStore = create<PanelState>((set) => ({
         : {},
     ),
 
-  exitWorkflow: () => set({ workflow: null, canvasOpen: true, viewHomeOverride: false }),
+  exitWorkflow: () =>
+    set({
+      workflow: null,
+      canvasOpen: true,
+      viewHomeOverride: false,
+      clickedCtas: new Set<string>(),
+    }),
+
+  markCtaClicked: (label) =>
+    set((s) => {
+      if (s.clickedCtas.has(label)) return {};
+      const next = new Set(s.clickedCtas);
+      next.add(label);
+      return { clickedCtas: next };
+    }),
 
   setCanvasOpen: (open) => set({ canvasOpen: open }),
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
+
+  openCanvasFile: (file) =>
+    set((s) => {
+      // Already open → focus by opening the canvas if needed.
+      if (s.canvasFiles.includes(file)) {
+        return { canvasOpen: true };
+      }
+      // 0 panes → open as first.
+      if (s.canvasFiles.length === 0) {
+        return { canvasOpen: true, canvasFiles: [file] };
+      }
+      // 1 pane → add as second (split view).
+      if (s.canvasFiles.length === 1) {
+        return { canvasOpen: true, canvasFiles: [...s.canvasFiles, file] };
+      }
+      // 2 panes → replace the second one (max 2 panes).
+      return { canvasOpen: true, canvasFiles: [s.canvasFiles[0], file] };
+    }),
+
+  focusCanvasFile: (file) =>
+    set(() => ({ canvasOpen: true, canvasFiles: [file] })),
+
+  closeCanvasFile: (file) =>
+    set((s) => {
+      const next = s.canvasFiles.filter((f) => f !== file);
+      if (next.length === 0) {
+        return { canvasFiles: [], canvasOpen: false };
+      }
+      return { canvasFiles: next };
+    }),
 
   showHomeView: () => set({ viewHomeOverride: true }),
   resumeWorkflow: () => set({ viewHomeOverride: false, canvasOpen: true }),

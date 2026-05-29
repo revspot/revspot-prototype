@@ -4,10 +4,11 @@
 // approval action lives in the left chat (via the step-cta part). This
 // pane just shows what Spot is working on.
 
-import { PanelRightClose, X, Users, Package, ChartPie, Sparkles, Megaphone, Layout as LayoutIcon, PartyPopper, CheckCircle2, Check, Wifi, WifiOff, Cog, ChevronRight, Pencil, Search, ShieldAlert, TrendingUp, ExternalLink, Image as ImageIcon, Mic, MessageSquare, Phone, ArrowRight, Upload, FileText, Film as FilmIcon, Layers, Paperclip, Brain } from "lucide-react";
+import { PanelRightClose, X, Users, Package, ChartPie, Sparkles, Megaphone, Layout as LayoutIcon, PartyPopper, CheckCircle2, Check, Wifi, WifiOff, Cog, ChevronRight, ChevronDown, Pencil, Search, ShieldAlert, TrendingUp, ExternalLink, Image as ImageIcon, Mic, MessageSquare, Phone, ArrowRight, Upload, FileText, Film as FilmIcon, Layers, Paperclip, Brain, Home, Maximize2 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { Variants } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSpotStore } from "@/lib/spot/store";
 import {
   STEP_LABELS,
@@ -22,6 +23,7 @@ import {
   VOICE_AGENTS,
   buildResizeReviews,
   generatePlan,
+  type CanvasFile,
   type WorkflowStep,
   type LaunchWorkflow,
   type DiagnosticWorkflow,
@@ -30,6 +32,7 @@ import {
   type CampaignBucket,
 } from "@/lib/spot/workflow";
 import {
+  AnalyzeStep,
   DiagnosticStep,
 } from "@/components/spot/workflow/diagnostic-steps";
 import {
@@ -50,6 +53,7 @@ const STEP_ICONS: Record<WorkflowStep, typeof Users> = {
   "launch-plan": Sparkles,
   "launch-building": Cog,
   "launch-review": CheckCircle2,
+  "launch-deploy": Upload,
   // Legacy step icons — unused since these steps left STEP_ORDER, but
   // kept for type-completeness on the Record<WorkflowStep, ...> map.
   personas: Users,
@@ -99,132 +103,421 @@ const canvasReveal: Variants = {
 // file browser of the product's memory: memory.md / plan.md /
 // dashboard.html / assets/. The step rail is gone — workflows are
 // agentic, not procedural, so we surface them as files instead of
-// chips.
-type FileTabKey = "memory" | "plan" | "dashboard" | "assets";
-
-const FILE_TABS: { key: FileTabKey; label: string; file: string; icon: typeof FileText }[] = [
+// chips. CanvasFile lives in workflow.ts so the chat header (which
+// owns the picker) can import the same type.
+export const FILE_TABS: {
+  key: CanvasFile;
+  label: string;
+  file: string;
+  icon: typeof FileText;
+}[] = [
   { key: "memory", label: "Memory", file: "memory.md", icon: FileText },
   { key: "plan", label: "Plan", file: "plan.md", icon: TrendingUp },
+  { key: "analysis", label: "Analysis", file: "analysis.md", icon: Search },
   { key: "dashboard", label: "Dashboard", file: "dashboard.html", icon: ChartPie },
   { key: "assets", label: "Assets", file: "assets/", icon: ImageIcon },
 ];
 
-/** Default tab to show based on the current workflow step. The user
- *  can switch tabs freely but step transitions auto-focus the most
- *  relevant file. */
-function defaultTabForStep(step: WorkflowStep): FileTabKey {
-  if (step === "product-setup" || step === "deep-research" || step === "kickoff")
+/** Filter file tabs for a given workflow · the Analysis tab only
+ *  exists for diagnostic workflows (scale / optimize / test-angles)
+ *  where Spot's findings are persisted as part of product memory. */
+export function fileTabsForWorkflow(workflow: SpotWorkflow | null) {
+  if (!workflow) return FILE_TABS.filter((t) => t.key !== "analysis");
+  const isDiagnostic =
+    workflow.kind === "scale" ||
+    workflow.kind === "optimize" ||
+    workflow.kind === "test-angles";
+  return FILE_TABS.filter((t) => t.key !== "analysis" || isDiagnostic);
+}
+
+/** Default file to focus when a workflow step changes. The chat
+ *  header's picker auto-opens this file when the user advances.
+ *
+ *  Dashboard is ONLY the home view for `campaign-dive` (Spot it on
+ *  a campaign row). Every other workflow drives the user through
+ *  Plan → Assets, never the dashboard.
+ */
+export function defaultFileForStep(step: WorkflowStep): CanvasFile {
+  // ── Launch flow ───────────────────────────────────────
+  if (
+    step === "product-setup" ||
+    step === "deep-research" ||
+    step === "kickoff"
+  )
     return "memory";
-  if (step === "launch-plan" || step.endsWith("-plan") || step.endsWith("-clarify"))
-    return "plan";
-  if (step === "launch-building") return "plan";
-  if (step === "launch-review") return "assets";
-  if (step.endsWith("-live") || step.endsWith("-analyze")) return "dashboard";
+  if (step === "launch-plan" || step === "launch-building") return "plan";
+  if (
+    step === "launch-review" ||
+    step === "launch-deploy" ||
+    step === "done"
+  )
+    return "assets";
+
+  // ── Scale + Optimize ─────────────────────────────────
+  // Analyze phase lands on the Analysis tab (Spot's findings live
+  // there as part of memory). Clarify / plan / live shift to the
+  // Plan tab so the user sees what's being updated.
+  if (step === "scale-analyze" || step === "opt-analyze") return "analysis";
+  if (step.startsWith("scale-") || step.startsWith("opt-")) return "plan";
+
+  // ── Test Angles ──────────────────────────────────────
+  // Analyze lands on Analysis (the audit of current angles); plan
+  // lands on Plan; live focuses Assets where new creatives appear.
+  if (step === "ang-analyze") return "analysis";
+  if (step === "ang-clarify" || step === "ang-plan") return "plan";
+  if (step === "ang-live") return "assets";
+
+  // ── Campaign dive ────────────────────────────────────
+  // The only workflow whose home view is the Dashboard.
   if (step === "campaign-dive") return "dashboard";
+
   return "memory";
 }
 
+/**
+ * Right-pane canvas. Renders 1 or 2 file panes side-by-side, driven
+ * by the store's `canvasFiles` array (managed from the chat header).
+ * Each pane has a slim header with the filename and an X to close;
+ * closing the last pane collapses the whole canvas.
+ *
+ * Visual treatment: rounded floating card with shadow so the canvas
+ * reads as an overlay on top of the chat rather than a hard split.
+ */
 export function WorkflowPane() {
   const workflow = useSpotStore((s) => s.workflow);
+  const canvasFiles = useSpotStore((s) => s.canvasFiles);
+  const closeCanvasFile = useSpotStore((s) => s.closeCanvasFile);
   const toggleCanvas = useSpotStore((s) => s.toggleCanvas);
   const exitWorkflow = useSpotStore((s) => s.exitWorkflow);
+  const focusCanvasFile = useSpotStore((s) => s.focusCanvasFile);
 
-  // Active file tab — initialised from the workflow step, then
-  // user-controlled. We update whenever the step changes, so step
-  // transitions still pull the user to the relevant file.
-  const [activeTab, setActiveTab] = useState<FileTabKey>(() =>
-    workflow ? defaultTabForStep(workflow.step) : "memory",
-  );
+  // Auto-focus the most relevant file when the workflow step changes.
+  // We REPLACE the canvas (not add a second pane) — advancing from
+  // memory → plan should swap the file in place, the way Claude
+  // Code's preview button does, not stack two panes side-by-side.
+  // The user can still manually open a second pane from the picker.
   useEffect(() => {
-    if (workflow) setActiveTab(defaultTabForStep(workflow.step));
+    if (!workflow) return;
+    const target = defaultFileForStep(workflow.step);
+    if (canvasFiles.length === 1 && canvasFiles[0] === target) return;
+    focusCanvasFile(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflow?.step]);
 
   if (!workflow) return null;
 
-  // Header verb adapts per workflow kind so the chrome reads correctly
-  // ("Scaling Guyju's JEE Crack" vs. "Launching Guyju's Spoken English").
-  const headerVerb =
-    workflow.kind === "scale"
-      ? "Scaling"
-      : workflow.kind === "optimize"
-        ? "Optimizing"
-        : workflow.kind === "test-angles"
-          ? "Testing angles ·"
-          : workflow.kind === "campaign-dive"
-            ? "Spot it ·"
-            : "Launching ·";
-  const headerTitle =
-    workflow.kind === "campaign-dive" ? workflow.entityName : workflow.productName;
+  // While the user is mid-card on the left (any sub-step of product
+  // setup), nothing meaningful exists to preview yet on the right.
+  // Show a clean "awaiting input" pane covering the whole canvas.
+  const isAwaitingSetup =
+    workflow.kind === "launch-campaign" &&
+    workflow.step === "product-setup";
+
+  // After the plan is approved we enter `launch-building`. Spot is
+  // assembling everything in the background — there's no file to
+  // preview yet. Take the whole canvas over with a dark Spot loader
+  // that walks the user through the build work.
+  const isBuilding =
+    workflow.kind === "launch-campaign" &&
+    workflow.step === "launch-building";
+
+  // Approve all · deploy live → enter the deploy phase. Same dark
+  // Spot pattern but with deployment-specific cycling thoughts.
+  const isDeploying =
+    workflow.kind === "launch-campaign" &&
+    workflow.step === "launch-deploy";
+
+  // After deploy completes, the canvas lands on the celebration
+  // screen. Big Spot mark, "X is live" headline, what shipped.
+  const isDone =
+    workflow.kind === "launch-campaign" && workflow.step === "done";
+
+  // Diagnostic flows (scale / optimize / test-angles) reuse the dark
+  // Spot loader for their analyze + plan phases. The `ready` flag on
+  // the workflow gates the reveal — while it's false, the loader
+  // takes the canvas; once true, the file view renders normally.
+  const diagPhase =
+    workflow.kind !== "launch-campaign" && workflow.kind !== "campaign-dive"
+      ? diagnosticPhaseFor(workflow.step)
+      : null;
+  const isDiagLoading = !!(
+    diagPhase &&
+    workflow.kind !== "launch-campaign" &&
+    workflow.kind !== "campaign-dive" &&
+    !workflow.ready
+  );
+
+  // Empty canvas defensively · the chat header's "Close canvas"
+  // button calls closeCanvasFile until the list is empty + sets
+  // canvasOpen=false, but if for some reason we render with 0 panes
+  // we just show the awaiting state.
+  const panes: CanvasFile[] = canvasFiles.length > 0 ? canvasFiles : ["memory"];
 
   return (
-    <div className="h-full flex flex-col bg-white">
-      {/* Header — product context + canvas controls */}
-      <div className="border-b border-border-subtle bg-surface-page">
-        <div className="px-5 py-3 flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] text-text-tertiary leading-tight">
-              {headerVerb} {headerTitle}
-            </div>
-            <div className="text-[14px] font-semibold text-text-primary leading-tight">
-              memory / {slugFor(workflow.productId, workflow.productName)}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={toggleCanvas}
-            title="Minimize canvas — chat stays full-width; workflow state is preserved."
-            className="inline-flex items-center justify-center h-7 w-7 rounded-button text-text-secondary hover:bg-surface-secondary hover:text-text-primary"
-          >
-            <PanelRightClose size={14} strokeWidth={1.6} />
-          </button>
-          <button
-            type="button"
-            onClick={exitWorkflow}
-            title="Close workflow — abandons progress and returns to Spot."
-            className="inline-flex items-center justify-center h-7 w-7 rounded-button text-text-secondary hover:bg-surface-secondary hover:text-text-primary"
-          >
-            <X size={14} strokeWidth={1.6} />
-          </button>
-        </div>
+    <div
+      className="h-full flex flex-col"
+      style={{ background: "#161614", color: "#F5F4EF" }}
+    >
+      {/* File panes — 1 or 2 columns side-by-side */}
+      <div className="flex-1 flex min-h-0">
+        {panes.map((tab, idx) => {
+          const meta = FILE_TABS.find((t) => t.key === tab) ?? FILE_TABS[0];
+          const Icon = meta.icon;
+          const canClose = panes.length > 1;
+          const isLast = idx === panes.length - 1;
+          return (
+            <div
+              key={tab}
+              className="flex-1 min-w-0 flex flex-col"
+              style={
+                idx > 0 ? { borderLeft: "1px solid #262623" } : undefined
+              }
+            >
+              {/* Pane header · slim, dark-mode, filename + close */}
+              <div
+                className="px-4 py-2.5 flex items-center gap-2"
+                style={{
+                  background: "#1A1A18",
+                  borderBottom: "1px solid #262623",
+                  color: "#B8B7B0",
+                }}
+              >
+                <Icon size={12} strokeWidth={1.7} />
+                <span className="text-[12px] font-medium" style={{ color: "#F5F4EF" }}>
+                  {meta.label}
+                </span>
+                <span className="text-[10.5px] font-mono" style={{ color: "#8A8980" }}>
+                  {meta.file}
+                </span>
+                <span className="flex-1" />
+                {canClose && (
+                  <button
+                    type="button"
+                    onClick={() => closeCanvasFile(tab)}
+                    title="Close this pane"
+                    className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-white/5"
+                    style={{ color: "#8A8980" }}
+                  >
+                    <X size={11} strokeWidth={1.8} />
+                  </button>
+                )}
+                {isLast && !canClose && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={toggleCanvas}
+                      title="Minimize canvas — chat stays full-width; workflow state is preserved."
+                      className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-white/5"
+                      style={{ color: "#8A8980" }}
+                    >
+                      <PanelRightClose size={11} strokeWidth={1.7} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exitWorkflow}
+                      title="Close workflow — abandons progress and returns to Spot."
+                      className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-white/5"
+                      style={{ color: "#8A8980" }}
+                    >
+                      <X size={11} strokeWidth={1.8} />
+                    </button>
+                  </>
+                )}
+                {isLast && canClose && (
+                  <>
+                    <span
+                      className="w-px h-3 mx-0.5"
+                      style={{ background: "#262623" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={toggleCanvas}
+                      title="Minimize canvas — chat stays full-width."
+                      className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-white/5"
+                      style={{ color: "#8A8980" }}
+                    >
+                      <PanelRightClose size={11} strokeWidth={1.7} />
+                    </button>
+                  </>
+                )}
+              </div>
 
-        {/* File tabs · Claude-Code style. Filename in monospace, active
-            tab gets a darker bottom border. */}
-        <div className="flex items-end px-5">
-          {FILE_TABS.map((t) => {
+              {/* Pane body · loader/celebration states take over;
+                  otherwise normal file body. */}
+              <div className="flex-1 overflow-y-auto">
+                {isAwaitingSetup && tab === "memory" ? (
+                  <AwaitingInputCanvas />
+                ) : isBuilding && tab !== "memory" ? (
+                  <LaunchBuildingLoader
+                    productName={
+                      workflow.kind === "launch-campaign"
+                        ? workflow.productName
+                        : ""
+                    }
+                  />
+                ) : isDeploying ? (
+                  <DeployingLoader
+                    productName={
+                      workflow.kind === "launch-campaign"
+                        ? workflow.productName
+                        : ""
+                    }
+                  />
+                ) : isDone ? (
+                  <ThankYouScreen
+                    productName={
+                      workflow.kind === "launch-campaign"
+                        ? workflow.productName
+                        : ""
+                    }
+                  />
+                ) : isDiagLoading && diagPhase ? (
+                  <DiagnosticPhaseLoader
+                    productName={(workflow as DiagnosticWorkflow).productName}
+                    kind={diagPhase.kind}
+                    phase={diagPhase.phase}
+                  />
+                ) : (
+                  <FileBody workflow={workflow} tab={tab} />
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * FilePickerDropdown · lives in the chat header (LEFT panel). Lets
+ * the user open any of the four canvas files. The checkmark indicates
+ * which files are currently open; clicking an already-open file
+ * focuses (opens canvas if minimised); clicking a closed file opens
+ * it (max 2 panes total — opening a third replaces the latest).
+ */
+export function ChatHeaderFilePicker({ compact = false }: { compact?: boolean }) {
+  const canvasFiles = useSpotStore((s) => s.canvasFiles);
+  const canvasOpen = useSpotStore((s) => s.canvasOpen);
+  const workflow = useSpotStore((s) => s.workflow);
+  const openCanvasFile = useSpotStore((s) => s.openCanvasFile);
+  const setCanvasOpen = useSpotStore((s) => s.setCanvasOpen);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const availableTabs = fileTabsForWorkflow(workflow);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Label · show the active (first) pane's filename when canvas is
+  // open; otherwise generic "Files" prompt.
+  const primary = canvasOpen && canvasFiles[0]
+    ? FILE_TABS.find((t) => t.key === canvasFiles[0]) ?? FILE_TABS[0]
+    : null;
+  const PrimaryIcon = primary?.icon ?? FileText;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center gap-1.5 rounded-button border border-border bg-white hover:border-border-hover text-text-primary ${
+          compact ? "h-7 px-2 text-[11.5px]" : "h-8 px-2.5 text-[12px]"
+        }`}
+        title={canvasOpen ? "Switch / add files" : "Open canvas files"}
+      >
+        <PrimaryIcon size={11} strokeWidth={1.7} className="text-text-secondary" />
+        {primary ? (
+          <span className="font-mono text-[11px]">{primary.file}</span>
+        ) : (
+          <span>Files</span>
+        )}
+        {canvasFiles.length === 2 && (
+          <span className="inline-flex items-center justify-center h-3.5 px-1 rounded-full bg-surface-secondary text-[9.5px] tabular text-text-tertiary">
+            2
+          </span>
+        )}
+        <ChevronDown size={11} strokeWidth={1.8} className="text-text-tertiary" />
+      </button>
+      {open && (
+        <div
+          className="absolute top-[calc(100%+4px)] right-0 z-50 bg-white border border-border rounded-card py-1 min-w-[240px]"
+          style={{ boxShadow: "0 8px 28px -8px rgba(0,0,0,0.14)" }}
+        >
+          <div className="px-3 pt-1 pb-1.5 text-[10px] uppercase tracking-wider text-text-tertiary font-medium">
+            Canvas files · up to 2 side-by-side
+          </div>
+          {availableTabs.map((t) => {
             const Icon = t.icon;
-            const active = t.key === activeTab;
+            const isOpen = canvasFiles.includes(t.key) && canvasOpen;
             return (
               <button
                 key={t.key}
                 type="button"
-                onClick={() => setActiveTab(t.key)}
-                className={`relative inline-flex items-center gap-1.5 py-2.5 px-3 text-[12px] font-medium transition-colors whitespace-nowrap ${
-                  active ? "text-text-primary" : "text-text-secondary hover:text-text-primary"
+                onClick={() => {
+                  openCanvasFile(t.key);
+                  setOpen(false);
+                }}
+                className={`w-full text-left flex items-center gap-2 px-3 h-8 hover:bg-surface-secondary text-[12.5px] ${
+                  isOpen ? "bg-surface-secondary/60" : ""
                 }`}
               >
-                <Icon size={11} strokeWidth={1.7} />
-                <span>{t.label}</span>
-                <span
-                  className="text-[10px] font-mono text-text-tertiary ml-0.5"
-                  style={{ opacity: active ? 0.7 : 0.4 }}
-                >
+                <Icon size={11} strokeWidth={1.7} className="text-text-tertiary" />
+                <span className="text-text-primary">{t.label}</span>
+                <span className="text-[10.5px] font-mono text-text-tertiary ml-auto">
                   {t.file}
                 </span>
-                {active && (
-                  <span
-                    aria-hidden
-                    className="absolute left-3 right-3 -bottom-px h-0.5 bg-text-primary rounded-full"
-                  />
+                {isOpen && (
+                  <Check size={11} strokeWidth={2} className="text-text-primary ml-1" />
                 )}
               </button>
             );
           })}
+          {canvasOpen && (
+            <>
+              <div className="border-t border-border-subtle my-1" />
+              <button
+                type="button"
+                onClick={() => {
+                  setCanvasOpen(false);
+                  setOpen(false);
+                }}
+                className="w-full text-left flex items-center gap-2 px-3 h-8 hover:bg-surface-secondary text-[12.5px] text-text-secondary"
+              >
+                <PanelRightClose size={11} strokeWidth={1.7} />
+                <span>Close canvas</span>
+              </button>
+            </>
+          )}
         </div>
-      </div>
+      )}
+    </div>
+  );
+}
 
-      {/* Body — file content */}
-      <div className="flex-1 overflow-y-auto">
-        <FileBody workflow={workflow} tab={activeTab} />
+/**
+ * Awaiting-input canvas · shown when the new-product workflow is
+ * mid-flight but the user hasn't submitted the drawer yet. No empty
+ * file mockup, no skeleton — just a calm loader that says Spot is
+ * waiting on the form. Keeps the right pane honest: there's nothing
+ * to preview yet.
+ */
+function AwaitingInputCanvas() {
+  return (
+    <div className="h-full flex flex-col items-center justify-center px-8 py-16 text-center">
+      <SpotLoader mode="orbit" size={48} className="!gap-0" />
+      <div className="text-section-header text-text-primary mt-5">
+        Awaiting your input
+      </div>
+      <div className="text-[12.5px] text-text-secondary mt-1.5 max-w-[340px] leading-relaxed">
+        Drop the basics in the form on the left. As soon as you submit, I&apos;ll
+        start research and write the product memory into this workspace.
       </div>
     </div>
   );
@@ -257,7 +550,7 @@ function FileBody({
   tab,
 }: {
   workflow: SpotWorkflow;
-  tab: FileTabKey;
+  tab: CanvasFile;
 }) {
   // Campaign-dive keeps its dedicated single-pane view — it's tied to a
   // specific entity, not a product memory.
@@ -274,6 +567,58 @@ function FileBody({
     step === "scale-plan" ||
     step === "opt-plan" ||
     step === "ang-plan";
+
+  // ── Diagnostic workflows (Scale · Optimize · Test Angles) ──────
+  // Render the per-step DiagnosticStep view (AnalyzeStep / ClarifyStep
+  // / PlanStep / LiveStep) regardless of which tab is selected, so the
+  // user sees the analysis after the analyze loader, the clarifying
+  // questions during clarify, the updated plan during plan, etc.
+  // Memory tab still shows product memory; ang-live + assets shows the
+  // generated creatives via AssetsFileView. (We already returned above
+  // for campaign-dive, so the narrowed kind here is one of the three
+  // diagnostic kinds or launch-campaign.)
+  if (workflow.kind !== "launch-campaign") {
+    if (tab === "memory") {
+      return (
+        <MemoryFileView
+          workflow={workflow}
+          buildingOverlay={isBuilding && tab === "memory"}
+        />
+      );
+    }
+    if (
+      workflow.kind === "test-angles" &&
+      workflow.step === "ang-live" &&
+      tab === "assets"
+    ) {
+      return (
+        <AssetsFileView
+          workflow={workflow}
+          buildingOverlay={false}
+        />
+      );
+    }
+    // Analysis tab · ALWAYS shows the analysis findings (Spot's audit
+    // of what's currently happening) even after the workflow has
+    // moved on to clarify/plan/live. Synthesise a "ready" view of
+    // the analyze step regardless of the current step.
+    if (tab === "analysis") {
+      const analyzeView = {
+        ...(workflow as DiagnosticWorkflow),
+        ready: true,
+      } as DiagnosticWorkflow;
+      return (
+        <div className="px-6 py-5 diagnostic-dark">
+          <AnalyzeStep workflow={analyzeView} />
+        </div>
+      );
+    }
+    return (
+      <div className="px-6 py-5 diagnostic-dark">
+        <DiagnosticStep workflow={workflow as DiagnosticWorkflow} />
+      </div>
+    );
+  }
 
   if (tab === "memory") {
     return <MemoryFileView workflow={workflow} buildingOverlay={isBuilding && tab === "memory"} />;
@@ -309,6 +654,710 @@ function getProductFiles(workflow: SpotWorkflow) {
   return null;
 }
 
+/**
+ * Sub-agents driving the deep-research memory build. Same animation
+ * pattern as the plan loader — each one runs sequentially through
+ * the 14-second tool-call, flipping queued → running → done.
+ * Durations are deliberately slow (~2-3s each) so the user has time
+ * to register each stage instead of seeing a blur of state changes.
+ */
+const MEMORY_BUILD_AGENTS: { id: string; label: string; duration: number }[] = [
+  { id: "url.crawl", label: "Crawling the brand site · about, curriculum, pricing", duration: 2400 },
+  { id: "web.scan", label: "Searching the open web for category signals", duration: 2200 },
+  { id: "docs.read", label: "Reading the documents you uploaded", duration: 1800 },
+  { id: "audience.match", label: "Matching against the Revspot audience graph", duration: 2100 },
+  { id: "data.synth", label: "Synthesizing findings into a coherent brief", duration: 2800 },
+  { id: "memory.write", label: "Writing brief · personas · pricing · USPs to memory", duration: 2700 },
+];
+
+/**
+ * Scripted findings · what Spot "discovers" over the loader run.
+ * Each one appears at a specific timestamp, the way a real agent
+ * would emit progress events. Pacing is deliberately staged — each
+ * finding gets ~600-900ms of breathing room so the user can read it
+ * before the next one slides in. Bursts and pauses mimic real work.
+ */
+const MEMORY_FINDINGS: {
+  time: number;
+  category: "crawl" | "web" | "docs" | "graph" | "synth" | "write";
+  icon: string;
+  label: string;
+}[] = [
+  // ── Stage 1 · Crawling (0-3s) — quick bursts of GET requests ──
+  { time: 500, category: "crawl", icon: "🌐", label: "GET /about · 200 · 1.4kb" },
+  { time: 1100, category: "crawl", icon: "🌐", label: "GET /curriculum · 200 · 8.2kb" },
+  { time: 1700, category: "crawl", icon: "🌐", label: "GET /pricing · 200 · 2.1kb" },
+  { time: 2400, category: "crawl", icon: "🔗", label: "Extracted 47 product entities" },
+  // ── Stage 2 · Web scan (3-6s) — slower, broader sources ──
+  { time: 3200, category: "web", icon: "🔍", label: "Indexed 12 category review sites" },
+  { time: 4000, category: "web", icon: "🔍", label: "Indexed 8 parent forum threads" },
+  { time: 4800, category: "web", icon: "🏷️", label: "Found 3 competitor pricing tiers" },
+  // ── Stage 3 · Docs (6-7.5s) — file parsing beats ──
+  { time: 5800, category: "docs", icon: "📄", label: "Parsed uploaded brochure · 14 pages" },
+  { time: 6600, category: "docs", icon: "📄", label: "Extracted 22 positioning phrases" },
+  // ── Stage 4 · Graph (7.5-9s) — cross-references ──
+  { time: 7400, category: "graph", icon: "🧠", label: "Matched 5 cross-product personas" },
+  { time: 8200, category: "graph", icon: "🧠", label: "Cohort overlap with 2 existing products" },
+  { time: 9000, category: "graph", icon: "📈", label: "Found ₹420 CPL benchmark · category median" },
+  // ── Stage 5 · Synth (9-12s) — the creative work, slower beats ──
+  { time: 9900, category: "synth", icon: "✨", label: "Drafted product tagline" },
+  { time: 10600, category: "synth", icon: "✨", label: "Locked 4 USPs · ranked by category lift" },
+  { time: 11200, category: "synth", icon: "🛡️", label: "Flagged 3 do-not-mention items" },
+  { time: 11800, category: "synth", icon: "👥", label: "Drafted Persona 1 · Working professional" },
+  { time: 12300, category: "synth", icon: "👥", label: "Drafted Persona 2 · College student" },
+  { time: 12700, category: "synth", icon: "👥", label: "Drafted Persona 3 · Parent buying for child" },
+  { time: 13100, category: "synth", icon: "💰", label: "Proposed 3 pricing tiers · median band" },
+  // ── Stage 6 · Write (12.5-14s) — atomic commits to memory.md ──
+  { time: 13500, category: "write", icon: "✓", label: "Committed brief → memory.md" },
+  { time: 13800, category: "write", icon: "✓", label: "Committed personas → memory.md" },
+  { time: 14000, category: "write", icon: "✓", label: "Memory index rebuilt · ready" },
+];
+
+/** Live counters · numbers tick up as findings accumulate. Each is
+ *  bound to a finding category (or sum of categories). */
+function countersFromFindings(visible: typeof MEMORY_FINDINGS) {
+  return {
+    pages: visible.filter((f) => f.category === "crawl" && f.label.startsWith("GET")).length,
+    entities: visible.find((f) => f.label.includes("entities"))
+      ? 47
+      : 0,
+    signals:
+      visible.filter((f) => f.category === "web").length +
+      visible.filter((f) => f.category === "graph").length,
+    personas: visible.filter((f) => f.label.startsWith("Drafted Persona")).length,
+  };
+}
+
+/** Animate a number tick from prev → next over a short duration. */
+function useTickingNumber(target: number, ms = 400) {
+  const [n, setN] = useState(target);
+  useEffect(() => {
+    if (n === target) return;
+    const start = n;
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      const t = Math.min(1, (Date.now() - startedAt) / ms);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const value = Math.round(start + (target - start) * eased);
+      setN(value);
+      if (t >= 1) clearInterval(id);
+    }, 40);
+    return () => clearInterval(id);
+  }, [target, ms, n]);
+  return n;
+}
+
+/**
+ * LiveBuildLoader · the shared "wow" loading surface. Same composition
+ * for the memory build phase and the plan build phase — just swap the
+ * config in. Designed to feel ALIVE: coordinated motions, live data
+ * streaming one entry at a time, counters that tick up smoothly,
+ * agents that flip queued → running → done in real time.
+ *
+ * Composition (top → bottom):
+ *
+ *   1. Hero block · gradient-meshed card with the orbit SpotLoader on
+ *      a soft radial glow, the page title, and a smooth gradient
+ *      progress bar with a glowing tip
+ *   2. Live counters · 4 big numbers ticking up as findings accumulate
+ *   3. Live findings stream · scrolling terminal-style feed, one
+ *      finding at a time, sliding in
+ *   4. Sub-agent topology · the underlying agents ticking through
+ */
+type LoaderConfig = {
+  agentName: string; // e.g. "Deep Research Agent"
+  title: React.ReactNode; // e.g. "Building memory for {gradient-name}"
+  blurb: string;
+  agents: typeof MEMORY_BUILD_AGENTS;
+  findings: typeof MEMORY_FINDINGS;
+  counters: {
+    icon: string;
+    label: string;
+    /** Derive the current value from the visible findings array. */
+    valueOf: (visible: typeof MEMORY_FINDINGS) => number;
+  }[];
+};
+
+function LiveBuildLoader({ config }: { config: LoaderConfig }) {
+  const TOTAL_MS = config.agents.reduce((s, a) => s + a.duration, 0);
+  const [doneCount, setDoneCount] = useState(0);
+  const [progress, setProgress] = useState(2);
+  const [visibleFindings, setVisibleFindings] = useState<typeof MEMORY_FINDINGS>(
+    [],
+  );
+  const findingsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDoneCount(0);
+    let cumulative = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    config.agents.forEach((a, i) => {
+      cumulative += a.duration;
+      timers.push(setTimeout(() => setDoneCount(i + 1), cumulative));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [config.agents]);
+
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(99, (elapsed / TOTAL_MS) * 100);
+      setProgress(pct);
+      if (pct >= 99) clearInterval(id);
+    }, 60);
+    return () => clearInterval(id);
+  }, [TOTAL_MS]);
+
+  // Live findings · push one at a time at its scheduled timestamp so
+  // the user sees the feed grow line-by-line (not a bulk reveal).
+  useEffect(() => {
+    setVisibleFindings([]);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    config.findings.forEach((f) => {
+      timers.push(
+        setTimeout(() => {
+          setVisibleFindings((prev) => [...prev, f]);
+        }, f.time),
+      );
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [config.findings]);
+
+  useEffect(() => {
+    if (findingsRef.current) {
+      findingsRef.current.scrollTop = findingsRef.current.scrollHeight;
+    }
+  }, [visibleFindings.length]);
+
+  return (
+    <div
+      className="px-6 py-6 max-w-[820px] mx-auto"
+      style={{ color: "#F5F4EF" }}
+    >
+      {/* ── HERO BLOCK · dark warm gradient with gold glow ─────── */}
+      <div
+        className="relative overflow-hidden rounded-card mb-5"
+        style={{
+          background:
+            "linear-gradient(135deg, #1F1B14 0%, #181612 50%, #131110 100%)",
+          border: "1px solid #2E2820",
+          boxShadow:
+            "0 16px 40px -16px rgba(0,0,0,0.5), 0 0 0 1px rgba(201,168,106,0.06) inset",
+        }}
+      >
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 60% 50% at 50% 25%, rgba(201, 168, 106, 0.18) 0%, transparent 70%)",
+          }}
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none opacity-30"
+          style={{
+            background:
+              "linear-gradient(110deg, transparent 30%, rgba(201,168,106,0.18) 50%, transparent 70%)",
+            backgroundSize: "200% 100%",
+            animation: "shimmerSweep 3.6s ease-in-out infinite",
+          }}
+        />
+
+        <div className="relative px-7 py-7">
+          <div className="flex items-start gap-5">
+            <div className="relative flex-shrink-0">
+              <div
+                aria-hidden
+                className="absolute inset-0 rounded-full"
+                style={{
+                  background:
+                    "radial-gradient(circle, rgba(201, 168, 106, 0.40) 0%, transparent 65%)",
+                  filter: "blur(10px)",
+                  transform: "scale(1.5)",
+                }}
+              />
+              <SpotLoader mode="orbit" size={56} className="!gap-0 relative" />
+            </div>
+
+            <div className="flex-1 min-w-0 pt-1">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#22C55E]">
+                  <span className="absolute inset-0 rounded-full bg-[#22C55E] opacity-60 animate-ping" />
+                </span>
+                <span
+                  className="text-[10.5px] uppercase tracking-wider font-semibold"
+                  style={{ color: "#22C55E" }}
+                >
+                  {config.agentName} · live
+                </span>
+              </div>
+              <h1
+                className="text-[22px] font-semibold tracking-tight leading-[1.15]"
+                style={{ color: "#F5F4EF" }}
+              >
+                {config.title}
+              </h1>
+              <p
+                className="text-[12.5px] mt-1.5 leading-relaxed"
+                style={{ color: "#A8A8A0" }}
+              >
+                {config.blurb}
+              </p>
+
+              <div className="mt-4">
+                <div
+                  className="relative h-1.5 rounded-full overflow-hidden"
+                  style={{ background: "rgba(255,255,255,0.06)" }}
+                >
+                  <div
+                    className="h-full transition-all duration-300 ease-out relative"
+                    style={{
+                      width: `${progress}%`,
+                      background:
+                        "linear-gradient(90deg, #C9A86A 0%, #E0C083 60%, #22C55E 100%)",
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full"
+                      style={{
+                        background: "#22C55E",
+                        boxShadow:
+                          "0 0 14px 3px rgba(34, 197, 94, 0.55), 0 0 4px rgba(255,255,255,0.4)",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span
+                    className="text-[10.5px] tabular font-medium"
+                    style={{ color: "#D6D6CE" }}
+                  >
+                    {Math.round(progress)}%
+                  </span>
+                  <span
+                    className="text-[10.5px] tabular"
+                    style={{ color: "#8A8980" }}
+                  >
+                    {doneCount} of {config.agents.length} sub-agents complete
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── LIVE COUNTERS ───────────────────────────────────── */}
+      <div
+        className="grid gap-2.5 mb-5"
+        style={{
+          gridTemplateColumns: `repeat(${config.counters.length}, minmax(0, 1fr))`,
+        }}
+      >
+        {config.counters.map((c, i) => (
+          <CounterCardLive
+            key={i}
+            icon={c.icon}
+            label={c.label}
+            target={c.valueOf(visibleFindings)}
+          />
+        ))}
+      </div>
+
+      {/* ── LIVE FINDINGS STREAM ───────────────────────────── */}
+      <div
+        className="rounded-card overflow-hidden mb-5"
+        style={{
+          background: "#1A1A18",
+          border: "1px solid #262623",
+        }}
+      >
+        <div
+          className="px-4 py-2.5 flex items-center gap-2"
+          style={{
+            background: "#15140F",
+            borderBottom: "1px solid #262623",
+          }}
+        >
+          <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#C9A86A]">
+            <span className="absolute inset-0 rounded-full bg-[#C9A86A] opacity-50 animate-ping" />
+          </span>
+          <span
+            className="text-[10.5px] uppercase tracking-wider font-semibold"
+            style={{ color: "#A8A8A0" }}
+          >
+            Live findings
+          </span>
+          <span className="flex-1" />
+          <span
+            className="text-[10.5px] tabular"
+            style={{ color: "#8A8980" }}
+          >
+            {visibleFindings.length} events
+          </span>
+        </div>
+        <div
+          ref={findingsRef}
+          className="px-4 py-2.5 h-48 overflow-y-auto scroll"
+          style={{ scrollBehavior: "smooth" }}
+        >
+          {visibleFindings.length === 0 ? (
+            <div
+              className="text-[11.5px] italic py-2"
+              style={{ color: "#8A8980" }}
+            >
+              Listening for events…
+            </div>
+          ) : (
+            <ul className="space-y-1">
+              {visibleFindings.map((f, i) => {
+                const ts = (f.time / 1000).toFixed(2);
+                return (
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 text-[11.5px] leading-relaxed"
+                    style={{
+                      animation:
+                        i === visibleFindings.length - 1
+                          ? "findingSlide 320ms ease-out"
+                          : undefined,
+                    }}
+                  >
+                    <span
+                      className="font-mono text-[10px] tabular flex-shrink-0"
+                      style={{ minWidth: "44px", color: "#7A7970" }}
+                    >
+                      +{ts}s
+                    </span>
+                    <span className="flex-shrink-0 text-[12px]" aria-hidden>
+                      {f.icon}
+                    </span>
+                    <span
+                      className="flex-1 truncate"
+                      style={{ color: "#D6D6CE" }}
+                    >
+                      {f.label}
+                    </span>
+                    <span
+                      className="text-[9.5px] uppercase tracking-wider font-semibold flex-shrink-0"
+                      style={{
+                        color: f.category === "write" ? "#22C55E" : "#8A8980",
+                      }}
+                    >
+                      {f.category}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* ── COMPACT AGENT STRIP ────────────────────────────── */}
+      <div
+        className="rounded-card overflow-hidden"
+        style={{
+          background: "#1A1A18",
+          border: "1px solid #262623",
+        }}
+      >
+        <div
+          className="px-4 py-2.5 flex items-center gap-2"
+          style={{
+            background: "#15140F",
+            borderBottom: "1px solid #262623",
+          }}
+        >
+          <Cog
+            size={11}
+            strokeWidth={1.8}
+            className="animate-spin"
+            style={{ animationDuration: "2.4s", color: "#A8A8A0" }}
+          />
+          <span
+            className="text-[10.5px] uppercase tracking-wider font-semibold"
+            style={{ color: "#A8A8A0" }}
+          >
+            Sub-agent topology
+          </span>
+        </div>
+        <ul style={{ borderTop: "0" }}>
+          {config.agents.map((a, i) => {
+            const done = i < doneCount;
+            const running = i === doneCount;
+            const queued = i > doneCount;
+            const bg = done
+              ? "rgba(34, 197, 94, 0.06)"
+              : running
+                ? "rgba(201, 168, 106, 0.07)"
+                : "transparent";
+            return (
+              <li
+                key={a.id}
+                className="flex items-center gap-2.5 px-4 py-1.5 transition-colors"
+                style={{
+                  background: bg,
+                  borderTop: i > 0 ? "1px solid #262623" : undefined,
+                }}
+              >
+                <span className="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
+                  {done && (
+                    <CheckCircle2
+                      size={13}
+                      strokeWidth={2}
+                      style={{ color: "#22C55E" }}
+                    />
+                  )}
+                  {running && (
+                    <Cog
+                      size={12}
+                      strokeWidth={1.8}
+                      className="animate-spin"
+                      style={{ animationDuration: "1.2s", color: "#F5F4EF" }}
+                    />
+                  )}
+                  {queued && (
+                    <span
+                      className="w-2.5 h-2.5 rounded-full"
+                      style={{ border: "1px solid #3A3A35" }}
+                    />
+                  )}
+                </span>
+                <span
+                  className="font-mono text-[11px] tabular"
+                  style={{ color: queued ? "#7A7970" : "#A8A8A0" }}
+                >
+                  {a.id}
+                </span>
+                <span
+                  className="text-[12px] flex-1 truncate"
+                  style={{
+                    color: queued
+                      ? "#7A7970"
+                      : done
+                        ? "#A8A8A0"
+                        : "#F5F4EF",
+                    fontWeight: running ? 500 : 400,
+                  }}
+                >
+                  {a.label}
+                </span>
+                {running && (
+                  <span
+                    className="text-[10px] uppercase tracking-wider font-semibold flex-shrink-0"
+                    style={{ color: "#E0C083" }}
+                  >
+                    running…
+                  </span>
+                )}
+                {done && (
+                  <span
+                    className="text-[10px] uppercase tracking-wider font-semibold flex-shrink-0"
+                    style={{ color: "#22C55E" }}
+                  >
+                    done
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/** Counter card · wraps a ticking number so the parent doesn't have
+ *  to plumb the hook into a render-flat config object. */
+function CounterCardLive({
+  icon,
+  label,
+  target,
+}: {
+  icon: string;
+  label: string;
+  target: number;
+}) {
+  const value = useTickingNumber(target);
+  return <CounterCard icon={icon} label={label} value={value} pulse={target > 0} />;
+}
+
+/* ── Memory + Plan loader wrappers (pick a config, render shared body) ── */
+
+function MemoryBuildingLoader({ productName }: { productName: string }) {
+  return (
+    <LiveBuildLoader
+      config={{
+        agentName: "Deep Research Agent",
+        title: (
+          <>
+            Building memory for{" "}
+            <span
+              style={{
+                background:
+                  "linear-gradient(135deg, #8C6D33 0%, #C9A86A 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+              }}
+            >
+              {productName}
+            </span>
+          </>
+        ),
+        blurb:
+          "One agent end-to-end — crawling, reading, synthesizing, then writing everything to product memory.",
+        agents: MEMORY_BUILD_AGENTS,
+        findings: MEMORY_FINDINGS,
+        counters: [
+          {
+            icon: "🌐",
+            label: "Pages crawled",
+            valueOf: (v) =>
+              v.filter((f) => f.category === "crawl" && f.label.startsWith("GET")).length,
+          },
+          {
+            icon: "🔗",
+            label: "Entities found",
+            valueOf: (v) => (v.find((f) => f.label.includes("entities")) ? 47 : 0),
+          },
+          {
+            icon: "📊",
+            label: "Signals indexed",
+            valueOf: (v) =>
+              v.filter((f) => f.category === "web").length +
+              v.filter((f) => f.category === "graph").length,
+          },
+          {
+            icon: "👥",
+            label: "Personas drafted",
+            valueOf: (v) =>
+              v.filter((f) => f.label.startsWith("Drafted Persona")).length,
+          },
+        ],
+      }}
+    />
+  );
+}
+
+/** Big-number counter card · dark surface, large tabular value,
+ *  small label, emoji icon. Soft gold glow when value > 0. */
+function CounterCard({
+  icon,
+  label,
+  value,
+  pulse,
+}: {
+  icon: string;
+  label: string;
+  value: number;
+  pulse: boolean;
+}) {
+  return (
+    <div
+      className="rounded-card px-3.5 py-3 relative overflow-hidden transition-transform"
+      style={{
+        background: "#1A1A18",
+        border: "1px solid #262623",
+      }}
+    >
+      {pulse && value > 0 && (
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 60% at 100% 0%, rgba(201, 168, 106, 0.18) 0%, transparent 70%)",
+          }}
+        />
+      )}
+      <div className="relative flex items-baseline gap-1.5">
+        <span className="text-[15px]" aria-hidden>
+          {icon}
+        </span>
+        <span
+          className="text-[22px] font-semibold tabular leading-none"
+          style={{ color: "#F5F4EF" }}
+        >
+          {value}
+        </span>
+      </div>
+      <div
+        className="text-[10px] uppercase tracking-wider font-semibold mt-1.5"
+        style={{ color: "#8A8980" }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/** Stringify the in-memory ResearchedMemory shape back into the same
+ *  markdown form the existing memory files use. Lets the same Markdown
+ *  renderer pick up the freshly-researched product without any new
+ *  card components. */
+function researchedMemoryToMd(
+  productName: string,
+  m: import("@/lib/spot/workflow").ResearchedMemory,
+): string {
+  const brief = m.brief
+    .map((r) => `- ${r.icon} **${r.label}** · ${r.value}`)
+    .join("\n");
+  const personas = (m.personas ?? [])
+    .map((p) => `- **${p.name}** · ${p.meta} · pain: ${p.pain}`)
+    .join("\n");
+  const pricing = m.pricing
+    .map(
+      (p) =>
+        `- **${p.name}** · ${p.cost}${p.cadence ? ` ${p.cadence}` : ""}${p.badge ? ` · _${p.badge}_` : ""}`,
+    )
+    .join("\n");
+  const offers = m.offers
+    .map((o) => `- ${o.label}${o.meta ? ` · _${o.meta}_` : ""}`)
+    .join("\n");
+  const usps = m.usps.map((u) => `- ${u}`).join("\n");
+  const avoid = m.avoid.map((a) => `- ${a}`).join("\n");
+  const sources = m.sources.map((s) => `- ${s}`).join("\n");
+
+  return `# ${productName}
+
+_Freshly researched · Memory just built_
+
+${m.tagline}
+
+## Product brief
+
+${brief}
+
+${personas ? `## Personas\n\n${personas}\n\n` : ""}## Pricing
+
+${pricing}
+
+## Offers
+
+${offers}
+
+## USPs · lead with these
+
+${usps}
+
+## Do not mention
+
+${avoid}
+
+## Sources I checked
+
+${sources}
+
+---
+
+_Memory built just now · Brand-new product · Edit any field in chat_
+`;
+}
+
 function MemoryFileView({
   workflow,
   buildingOverlay,
@@ -318,32 +1367,1028 @@ function MemoryFileView({
 }) {
   const files = getProductFiles(workflow);
 
-  // New product flow · memory file is being built. Show whatever the
-  // user has answered so far as a sketch markdown document.
-  if (!files && workflow.kind === "launch-campaign") {
-    const answers = workflow.productSetupAnswers ?? {};
-    const partial = buildPartialMemoryMd(workflow.productName, answers);
+  // ── New product · research / building phase ────────────────
+  // No files, no researchedMemory yet — render the cycling Spot
+  // loader so the canvas shows concrete agent progress.
+  const isBuildingFromScratch =
+    workflow.kind === "launch-campaign" &&
+    !files &&
+    !workflow.researchedMemory &&
+    (workflow.step === "deep-research" ||
+      (workflow.step === "kickoff" && !workflow.kickoffReady));
+
+  if (isBuildingFromScratch && workflow.kind === "launch-campaign") {
+    return <MemoryBuildingLoader productName={workflow.productName} />;
+  }
+
+  // ── New product · research complete ────────────────────────
+  // researchedMemory holds the synthesised brief/pricing/etc. Render
+  // it via the same Markdown component used for existing memory so
+  // the user sees the full Notion-grade canvas, not "No memory yet".
+  if (
+    !files &&
+    workflow.kind === "launch-campaign" &&
+    workflow.researchedMemory
+  ) {
+    const md = researchedMemoryToMd(
+      workflow.productName,
+      workflow.researchedMemory,
+    );
     return (
       <div className="relative">
         <div className="px-6 py-5 max-w-[720px]">
-          <Markdown source={partial} />
+          <Markdown source={md} theme="dark" />
         </div>
-        {buildingOverlay && <BuildingOverlay label="Spot is building this file…" />}
       </div>
     );
   }
 
+  // ── Existing product · render product-info.md ─────────────
   if (!files) {
     return <EmptyFile label="No memory yet." />;
   }
   return (
     <div className="relative">
       <div className="px-6 py-5 max-w-[720px]">
-        <Markdown source={files.productInfoMd} />
+        <Markdown source={files.productInfoMd} theme="dark" />
       </div>
       {buildingOverlay && <BuildingOverlay label="Spot is updating memory…" />}
     </div>
   );
+}
+
+
+/**
+ * Plan-building loader · deliberately minimal. The Spot orb floats
+ * on a dark canvas while a single sentence cycles every ~1.9s. The
+ * copy frames the "no past data" reality of a brand-new product so
+ * the user understands *why* Spot is recommending a conservative
+ * experiment plan instead of just spinning a vague progress bar.
+ */
+const PLAN_THOUGHTS = [
+  "Analyzing memory…",
+  "We don't have any existing campaigns or goals yet.",
+  "Let me plan experiment campaigns to figure out what works.",
+  "Personas first — three target groups from the brief.",
+  "Composing creative angles for each persona.",
+  "Drafting media mix · Meta · Google · WhatsApp.",
+  "Sequencing the 14-day rollout in phases.",
+  "Locking budget allocations · conservative caps.",
+  "Building your plan…",
+];
+
+/** Deployment thoughts · the dark Spot loader for the moment after
+ *  the user clicks "Approve all · deploy live". Maps to the
+ *  ad/page/form/pixel/tracker push to Meta + Google + WhatsApp. */
+const DEPLOY_THOUGHTS = [
+  "Provisioning Meta Ads Manager handles…",
+  "Publishing 12 creatives + 6 reels to Meta…",
+  "Pushing 9 ad sets across 3 campaigns…",
+  "Setting up Google Search + Discover campaigns…",
+  "Deploying 3 landing pages to CDN…",
+  "Activating Meta pixel + Conversion API…",
+  "Wiring lead forms + WhatsApp business inbox…",
+  "Verifying tracking — fire test events…",
+  "All ads live. Watchers are armed.",
+];
+
+/** Cycling thoughts for every phase of the three diagnostic
+ *  workflows (scale · optimize · test-angles). Each step gets the
+ *  same DarkSpotLoader pattern as the launch flow so the user
+ *  never sees the canvas freeze between steps. */
+const DIAGNOSTIC_THOUGHTS = {
+  scale: {
+    analyze: [
+      "Reading the last 30 days of campaign performance…",
+      "Finding the winners — ad sets that beat target CPL.",
+      "Checking audience saturation curves.",
+      "Looking for headroom · underspent winners.",
+      "Modeling cost-elasticity per channel.",
+      "Drafting a scale plan that won't break CPL.",
+    ],
+    clarify: [
+      "Framing the scale goal…",
+      "Narrowing the option space.",
+      "Picking the right questions to ask you.",
+    ],
+    plan: [
+      "Folding your picks into the plan…",
+      "Mapping winners to scale-ready audiences.",
+      "Drafting budget shifts · winners up, decay down.",
+      "Adding lookalike + interest expansions per winner.",
+      "Recomputing daily caps with safety margin.",
+      "Locking the updated plan.",
+    ],
+    live: [
+      "Pushing winners up · trimming decay…",
+      "Activating new audience expansions.",
+      "Setting Week 1 daily caps.",
+      "Arming the scale watchers.",
+      "Scale plan is live · I'll surface results as they come in.",
+    ],
+  },
+  optimize: {
+    analyze: [
+      "Reading the last 30 days of campaign performance…",
+      "Detecting creative fatigue · CTR decay curves.",
+      "Finding audience saturation hot-spots.",
+      "Cross-referencing landing-page bounce signals.",
+      "Identifying the cleanest wins to act on.",
+      "Drafting an optimization plan you can ship today.",
+    ],
+    clarify: [
+      "Framing the optimization priority…",
+      "Narrowing where to act first.",
+      "Picking the right questions to ask you.",
+    ],
+    plan: [
+      "Folding your picks into the plan…",
+      "Drafting pause list · clearly broken units.",
+      "Drafting creative refreshes per fatigued unit.",
+      "Adding audience swaps where saturation is high.",
+      "Tightening targeting on chronic underperformers.",
+      "Locking the updated plan.",
+    ],
+    live: [
+      "Pausing fatigued ad sets…",
+      "Briefing the creative refreshes.",
+      "Swapping audiences in saturated cohorts.",
+      "Arming the optimize watchers.",
+      "Optimization plan is live.",
+    ],
+  },
+  "test-angles": {
+    analyze: [
+      "Reading the creative library + recent winners…",
+      "Mapping current angles per persona.",
+      "Identifying angle gaps + untested positioning.",
+      "Brainstorming fresh angles informed by category signals.",
+      "Drafting a test plan with clear success criteria.",
+    ],
+    clarify: [
+      "Framing the angle hypothesis…",
+      "Narrowing the test universe.",
+      "Picking the right questions to ask you.",
+    ],
+    plan: [
+      "Drafting the Persona × Angle test matrix…",
+      "Composing 3 new creative concepts per persona.",
+      "Setting budget caps + minimum learn windows.",
+      "Locking the test plan.",
+    ],
+    live: [
+      "Generating new creative concepts per persona…",
+      "Pushing 6 new angles to Meta.",
+      "Setting balanced traffic split.",
+      "Arming the early-stop guardrail.",
+      "6 angles are live · learning starts now.",
+    ],
+  },
+} as const;
+
+/** Maps a diagnostic step to (kind, phase) so we can pull the right
+ *  thoughts array out of the table above. Every diagnostic step has
+ *  a phase mapping so the loader runs through the whole flow. */
+function diagnosticPhaseFor(step: WorkflowStep): {
+  kind: "scale" | "optimize" | "test-angles";
+  phase: "analyze" | "clarify" | "plan" | "live";
+} | null {
+  if (step === "scale-analyze") return { kind: "scale", phase: "analyze" };
+  if (step === "scale-clarify") return { kind: "scale", phase: "clarify" };
+  if (step === "scale-plan") return { kind: "scale", phase: "plan" };
+  if (step === "scale-live") return { kind: "scale", phase: "live" };
+  if (step === "opt-analyze") return { kind: "optimize", phase: "analyze" };
+  if (step === "opt-clarify") return { kind: "optimize", phase: "clarify" };
+  if (step === "opt-plan") return { kind: "optimize", phase: "plan" };
+  if (step === "opt-live") return { kind: "optimize", phase: "live" };
+  if (step === "ang-analyze") return { kind: "test-angles", phase: "analyze" };
+  if (step === "ang-clarify") return { kind: "test-angles", phase: "clarify" };
+  if (step === "ang-plan") return { kind: "test-angles", phase: "plan" };
+  if (step === "ang-live") return { kind: "test-angles", phase: "live" };
+  return null;
+}
+
+type DiagPhase = "analyze" | "clarify" | "plan" | "live";
+type DiagKind = "scale" | "optimize" | "test-angles";
+
+/** Dark Spot loader for diagnostic flows · same pattern as launch.
+ *  Used during every phase (analyze / clarify / plan / live) so the
+ *  canvas never goes blank between steps. */
+function DiagnosticPhaseLoader({
+  productName,
+  kind,
+  phase,
+}: {
+  productName: string;
+  kind: DiagKind;
+  phase: DiagPhase;
+}) {
+  const showHomeView = useSpotStore((s) => s.showHomeView);
+  const verbs: Record<DiagKind, Record<DiagPhase, string>> = {
+    scale: {
+      analyze: "Analyzing scale opportunities for",
+      clarify: "Framing the scale brief for",
+      plan: "Drafting the scale plan for",
+      live: "Pushing the scale plan live for",
+    },
+    optimize: {
+      analyze: "Analyzing what's holding back",
+      clarify: "Framing the optimization brief for",
+      plan: "Drafting the optimization plan for",
+      live: "Shipping the optimizations for",
+    },
+    "test-angles": {
+      analyze: "Auditing current angles for",
+      clarify: "Framing the angle-test brief for",
+      plan: "Drafting the angle-test plan for",
+      live: "Launching new angles for",
+    },
+  };
+  const agentLabels: Record<DiagKind, Record<DiagPhase, string>> = {
+    scale: {
+      analyze: "Scale Analyst · live",
+      clarify: "Scale Brief Agent · live",
+      plan: "Scale Planner · live",
+      live: "Scale Deploy Agent · live",
+    },
+    optimize: {
+      analyze: "Optimization Analyst · live",
+      clarify: "Optimization Brief Agent · live",
+      plan: "Optimization Planner · live",
+      live: "Optimization Deploy Agent · live",
+    },
+    "test-angles": {
+      analyze: "Creative Strategist · live",
+      clarify: "Angle Brief Agent · live",
+      plan: "Angle Test Planner · live",
+      live: "Angle Deploy Agent · live",
+    },
+  };
+  const thoughts = DIAGNOSTIC_THOUGHTS[kind][phase] as readonly string[];
+  return (
+    <DarkSpotLoader
+      agentLabel={agentLabels[kind][phase]}
+      title={
+        <>
+          {verbs[kind][phase]}{" "}
+          <span
+            style={{
+              background:
+                "linear-gradient(135deg, #C9A86A 0%, #E0C083 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}
+          >
+            {productName}
+          </span>
+        </>
+      }
+      thoughts={[...thoughts]}
+      intervalMs={2000}
+      actions={
+        <div className="flex items-center gap-2 mt-8">
+          <button
+            type="button"
+            onClick={showHomeView}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] transition-colors hover:bg-white/5"
+            style={{ color: "#A8A8A0" }}
+          >
+            <Home size={12} strokeWidth={1.7} />
+            Back to Spot homepage
+          </button>
+        </div>
+      }
+    />
+  );
+}
+
+/** The five concrete tasks Spot runs after the user clicks
+ *  "Put Spot to work". Each task has its own visible state in the
+ *  LaunchBuildingTaskLoader (queued → running → done) and the
+ *  durations sum to ~28s to match the launch-building tool-call. */
+const LAUNCH_BUILD_TASKS: {
+  id: string;
+  label: string;
+  sub: string;
+  duration: number;
+}[] = [
+  {
+    id: "creatives",
+    label: "Building creatives, forms, landing pages",
+    sub: "12 statics · 6 reels · 3 landing pages · 2 lead forms",
+    duration: 6500,
+  },
+  {
+    id: "plan",
+    label: "Building the campaign plan",
+    sub: "3 Meta campaigns · 9 ad sets · Google Search + Discover",
+    duration: 5000,
+  },
+  {
+    id: "crm",
+    label: "Verifying CRM integrations",
+    sub: "lead routing · pixel · CAPI · attribution windows",
+    duration: 4500,
+  },
+  {
+    id: "agent",
+    label: "Building Pre-Sales Agent (Voice + WhatsApp)",
+    sub: "agent persona · script · objection handling · escalation rules",
+    duration: 6500,
+  },
+  {
+    id: "launch",
+    label: "Launching campaigns",
+    sub: "publishing to Meta + Google · arming the watchers",
+    duration: 5500,
+  },
+];
+
+/** Shared dark-Spot loader surface used by both PlanBuildingLoader
+ *  and LaunchBuildingLoader · the only thing that changes is the
+ *  set of cycling thoughts, the agent eyebrow label, and optional
+ *  action buttons rendered under the progress dots. */
+function DarkSpotLoader({
+  agentLabel,
+  title,
+  thoughts,
+  intervalMs = 1900,
+  actions,
+}: {
+  agentLabel: string;
+  title: React.ReactNode;
+  thoughts: string[];
+  intervalMs?: number;
+  actions?: React.ReactNode;
+}) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (thoughts.length < 2) return;
+    const id = setInterval(() => {
+      setIdx((i) => (i + 1) % thoughts.length);
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [thoughts.length, intervalMs]);
+
+  return (
+    <div
+      className="h-full flex flex-col items-center justify-center px-8 py-12 text-center"
+      style={{ background: "#0A0A09" }}
+    >
+      {/* Soft gold radial glow behind the orb */}
+      <div className="relative mb-7">
+        <div
+          aria-hidden
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(201, 168, 106, 0.32) 0%, transparent 65%)",
+            filter: "blur(14px)",
+            transform: "scale(1.6)",
+          }}
+        />
+        <SpotLoader mode="orbit" size={84} className="!gap-0 relative" />
+      </div>
+
+      <div
+        className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider font-semibold mb-2"
+        style={{ color: "#22C55E" }}
+      >
+        <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#22C55E]">
+          <span className="absolute inset-0 rounded-full bg-[#22C55E] opacity-50 animate-ping" />
+        </span>
+        {agentLabel}
+      </div>
+
+      <h1
+        className="text-[24px] font-semibold tracking-tight leading-tight max-w-[560px]"
+        style={{ color: "#F5F4EF" }}
+      >
+        {title}
+      </h1>
+
+      {/* Cycling thought · key={idx} re-fires the slide-in keyframe */}
+      <div
+        key={idx}
+        className="mt-4 text-[14px] leading-relaxed max-w-[520px]"
+        style={{
+          color: "#A8A8A0",
+          animation: "findingSlide 320ms ease-out",
+          minHeight: "44px",
+        }}
+      >
+        {thoughts[idx]}
+      </div>
+
+      {/* Tiny progress dots · vague indicator that something's happening */}
+      <div className="flex items-center gap-1.5 mt-7">
+        {thoughts.map((_, i) => (
+          <span
+            key={i}
+            className="rounded-full transition-all duration-300"
+            style={{
+              width: i === idx ? "16px" : "4px",
+              height: "4px",
+              background: i <= idx ? "#C9A86A" : "#2A2A26",
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Optional action row · used by the launch-building loader to
+          expose View memory / Spot homepage buttons. */}
+      {actions}
+    </div>
+  );
+}
+
+/**
+ * Launch-building canvas loader · the dark Spot canvas shown after
+ * the user clicks "Put Spot to work". Designed around 5 explicit
+ * tasks — each one renders as a row in a task list with state
+ * (queued / running / done) and a one-line sub-label so the user
+ * sees exactly what Spot is doing at each beat.
+ */
+function LaunchBuildingLoader({ productName }: { productName: string }) {
+  const showHomeView = useSpotStore((s) => s.showHomeView);
+  const router = useRouter();
+  const TOTAL_MS = LAUNCH_BUILD_TASKS.reduce((s, t) => s + t.duration, 0);
+  const [doneCount, setDoneCount] = useState(0);
+  const [progress, setProgress] = useState(2);
+
+  // Advance task state on each task's duration boundary.
+  useEffect(() => {
+    setDoneCount(0);
+    let cumulative = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    LAUNCH_BUILD_TASKS.forEach((t, i) => {
+      cumulative += t.duration;
+      timers.push(setTimeout(() => setDoneCount(i + 1), cumulative));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // Smooth progress bar across the whole 28s run.
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(99, (elapsed / TOTAL_MS) * 100);
+      setProgress(pct);
+      if (pct >= 99) clearInterval(id);
+    }, 80);
+    return () => clearInterval(id);
+  }, [TOTAL_MS]);
+
+  return (
+    <div
+      className="h-full flex flex-col items-center justify-center px-8 py-12"
+      style={{ background: "#0A0A09" }}
+    >
+      {/* Spot orb + headline */}
+      <div className="relative mb-6">
+        <div
+          aria-hidden
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(201, 168, 106, 0.32) 0%, transparent 65%)",
+            filter: "blur(14px)",
+            transform: "scale(1.5)",
+          }}
+        />
+        <SpotLoader mode="orbit" size={64} className="!gap-0 relative" />
+      </div>
+
+      <div
+        className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider font-semibold mb-2"
+        style={{ color: "#22C55E" }}
+      >
+        <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#22C55E]">
+          <span className="absolute inset-0 rounded-full bg-[#22C55E] opacity-50 animate-ping" />
+        </span>
+        Build Agent · live · 5 tasks
+      </div>
+
+      <h1
+        className="text-[22px] font-semibold tracking-tight leading-tight text-center max-w-[560px]"
+        style={{ color: "#F5F4EF" }}
+      >
+        Spot is working on{" "}
+        <span
+          style={{
+            background:
+              "linear-gradient(135deg, #C9A86A 0%, #E0C083 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}
+        >
+          {productName}
+        </span>
+      </h1>
+
+      {/* Progress bar */}
+      <div className="w-full max-w-[540px] mt-5">
+        <div
+          className="relative h-1.5 rounded-full overflow-hidden"
+          style={{ background: "rgba(255,255,255,0.06)" }}
+        >
+          <div
+            className="h-full transition-all duration-300 ease-out relative"
+            style={{
+              width: `${progress}%`,
+              background:
+                "linear-gradient(90deg, #C9A86A 0%, #E0C083 60%, #22C55E 100%)",
+            }}
+          >
+            <span
+              aria-hidden
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full"
+              style={{
+                background: "#22C55E",
+                boxShadow:
+                  "0 0 14px 3px rgba(34, 197, 94, 0.55), 0 0 4px rgba(255,255,255,0.4)",
+              }}
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-between mt-1.5">
+          <span
+            className="text-[10.5px] tabular font-medium"
+            style={{ color: "#D6D6CE" }}
+          >
+            {Math.round(progress)}%
+          </span>
+          <span
+            className="text-[10.5px] tabular"
+            style={{ color: "#8A8980" }}
+          >
+            {doneCount} of {LAUNCH_BUILD_TASKS.length} tasks complete
+          </span>
+        </div>
+      </div>
+
+      {/* Task list */}
+      <div
+        className="w-full max-w-[540px] mt-6 rounded-card overflow-hidden"
+        style={{
+          background: "#1A1A18",
+          border: "1px solid #262623",
+        }}
+      >
+        <ul>
+          {LAUNCH_BUILD_TASKS.map((t, i) => {
+            const done = i < doneCount;
+            const running = i === doneCount;
+            const queued = i > doneCount;
+            const rowBg = done
+              ? "rgba(34, 197, 94, 0.06)"
+              : running
+                ? "rgba(201, 168, 106, 0.07)"
+                : "transparent";
+            return (
+              <li
+                key={t.id}
+                className="px-4 py-3 transition-colors flex items-start gap-3"
+                style={{
+                  background: rowBg,
+                  borderTop: i > 0 ? "1px solid #262623" : undefined,
+                }}
+              >
+                {/* Status glyph */}
+                <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {done && (
+                    <CheckCircle2
+                      size={15}
+                      strokeWidth={2}
+                      style={{ color: "#22C55E" }}
+                    />
+                  )}
+                  {running && (
+                    <Cog
+                      size={14}
+                      strokeWidth={1.8}
+                      className="animate-spin"
+                      style={{ animationDuration: "1.2s", color: "#E0C083" }}
+                    />
+                  )}
+                  {queued && (
+                    <span
+                      className="w-3 h-3 rounded-full"
+                      style={{ border: "1.5px solid #3A3A35" }}
+                    />
+                  )}
+                </span>
+
+                {/* Step number + content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-[10.5px] tabular font-mono flex-shrink-0"
+                      style={{
+                        color: queued ? "#5A5A52" : done ? "#7A7970" : "#C9A86A",
+                      }}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span
+                      className="text-[13px] flex-1 truncate"
+                      style={{
+                        color: queued
+                          ? "#7A7970"
+                          : done
+                            ? "#A8A8A0"
+                            : "#F5F4EF",
+                        fontWeight: running ? 600 : 500,
+                      }}
+                    >
+                      {t.label}
+                    </span>
+                    {running && (
+                      <span
+                        className="text-[10px] uppercase tracking-wider font-semibold flex-shrink-0"
+                        style={{ color: "#E0C083" }}
+                      >
+                        running…
+                      </span>
+                    )}
+                    {done && (
+                      <span
+                        className="text-[10px] uppercase tracking-wider font-semibold flex-shrink-0"
+                        style={{ color: "#22C55E" }}
+                      >
+                        done
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className="text-[11px] mt-0.5 truncate"
+                    style={{
+                      color: queued ? "#5A5A52" : "#8A8980",
+                    }}
+                  >
+                    {t.sub}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 mt-7">
+        <button
+          type="button"
+          onClick={() =>
+            router.push("/memory?focus=prod-guyjus-spoken-english")
+          }
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] font-medium transition-colors"
+          style={{ background: "#FAFAF8", color: "#0A0A09" }}
+        >
+          View project memory
+          <ArrowRight size={11} strokeWidth={1.8} />
+        </button>
+        <button
+          type="button"
+          onClick={showHomeView}
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] transition-colors hover:bg-white/5"
+          style={{ color: "#A8A8A0" }}
+        >
+          <Home size={12} strokeWidth={1.7} />
+          Back to Spot homepage
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Deployment loader · shown for the ~14s after the user clicks
+ *  "Approve all · deploy live". The Spot orb floats on black,
+ *  thoughts cycle every ~1.8s, the progress dots fill, and a
+ *  "Back to Spot homepage" CTA lets the user step away (the
+ *  homepage gets a "Spot is deploying" section while it runs). */
+function DeployingLoader({ productName }: { productName: string }) {
+  const showHomeView = useSpotStore((s) => s.showHomeView);
+  return (
+    <DarkSpotLoader
+      agentLabel="Deploy Agent · live"
+      title={
+        <>
+          Deploying{" "}
+          <span
+            style={{
+              background:
+                "linear-gradient(135deg, #C9A86A 0%, #E0C083 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}
+          >
+            {productName}
+          </span>{" "}
+          to Meta · Google · WhatsApp
+        </>
+      }
+      thoughts={DEPLOY_THOUGHTS}
+      intervalMs={1800}
+      actions={
+        <div className="flex items-center gap-2 mt-8">
+          <button
+            type="button"
+            onClick={showHomeView}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] font-medium transition-colors hover:bg-white/5"
+            style={{ color: "#A8A8A0" }}
+          >
+            <Home size={12} strokeWidth={1.7} />
+            Back to Spot homepage
+          </button>
+        </div>
+      }
+    />
+  );
+}
+
+/** Thank-you screen · the canvas state after deploy finishes. Big
+ *  celebratory Spot orb on black, gold-gradient headline, a short
+ *  list of what just went live, and a CTA to head back to home. */
+function ThankYouScreen({ productName }: { productName: string }) {
+  const router = useRouter();
+  const exitWorkflow = useSpotStore((s) => s.exitWorkflow);
+  return (
+    <div
+      className="h-full flex flex-col items-center justify-center px-8 py-12 text-center"
+      style={{ background: "#0A0A09" }}
+    >
+      {/* Soft gold radial glow behind the orb */}
+      <div className="relative mb-7">
+        <div
+          aria-hidden
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(34, 197, 94, 0.30) 0%, transparent 65%)",
+            filter: "blur(18px)",
+            transform: "scale(1.8)",
+          }}
+        />
+        <div className="relative">
+          <SpotMark size={80} />
+        </div>
+      </div>
+
+      <div
+        className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider font-semibold mb-3"
+        style={{ color: "#22C55E" }}
+      >
+        <CheckCircle2 size={11} strokeWidth={2.2} />
+        Deployed · live now
+      </div>
+
+      <h1
+        className="text-[28px] font-semibold tracking-tight leading-tight max-w-[600px]"
+        style={{ color: "#F5F4EF" }}
+      >
+        <span
+          style={{
+            background:
+              "linear-gradient(135deg, #C9A86A 0%, #E0C083 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}
+        >
+          {productName}
+        </span>{" "}
+        is live.
+      </h1>
+
+      <p
+        className="mt-3 text-[14px] leading-relaxed max-w-[520px]"
+        style={{ color: "#A8A8A0" }}
+      >
+        18 creatives · 3 landing pages · 2 lead forms · 3 campaigns shipped to
+        Meta, Google, and WhatsApp. Watchers are armed and I&apos;ll surface
+        the first results the moment data lands.
+      </p>
+
+      {/* What's live · 4 cards */}
+      <div className="grid grid-cols-4 gap-2.5 mt-7 w-full max-w-[640px]">
+        {[
+          { icon: "📣", label: "3 campaigns", sub: "Meta + Google" },
+          { icon: "🎨", label: "18 creatives", sub: "all sizes deployed" },
+          { icon: "📄", label: "3 landing pages", sub: "live on CDN" },
+          { icon: "📋", label: "2 lead forms", sub: "+ WhatsApp inbox" },
+        ].map((c, i) => (
+          <div
+            key={i}
+            className="rounded-card px-3.5 py-3 text-left"
+            style={{
+              background: "#1A1A18",
+              border: "1px solid #262623",
+            }}
+          >
+            <div className="text-[18px]" aria-hidden>
+              {c.icon}
+            </div>
+            <div
+              className="text-[12px] font-semibold mt-1"
+              style={{ color: "#F5F4EF" }}
+            >
+              {c.label}
+            </div>
+            <div
+              className="text-[10.5px] mt-0.5"
+              style={{ color: "#8A8980" }}
+            >
+              {c.sub}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 mt-8">
+        <button
+          type="button"
+          onClick={() => {
+            exitWorkflow();
+            router.push("/spot");
+          }}
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] font-medium transition-colors"
+          style={{ background: "#FAFAF8", color: "#0A0A09" }}
+        >
+          Back to Spot homepage
+          <ArrowRight size={11} strokeWidth={1.8} />
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            router.push("/memory?focus=prod-guyjus-spoken-english")
+          }
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] transition-colors hover:bg-white/5"
+          style={{ color: "#A8A8A0" }}
+        >
+          View project memory
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlanBuildingLoader({ productName }: { productName: string }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (PLAN_THOUGHTS.length < 2) return;
+    const id = setInterval(() => {
+      setIdx((i) => (i + 1) % PLAN_THOUGHTS.length);
+    }, 1900);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div
+      className="h-full flex flex-col items-center justify-center px-8 py-12 text-center"
+      style={{ background: "#0A0A09" }}
+    >
+      {/* Soft gold radial glow behind the orb */}
+      <div className="relative mb-7">
+        <div
+          aria-hidden
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(201, 168, 106, 0.32) 0%, transparent 65%)",
+            filter: "blur(14px)",
+            transform: "scale(1.6)",
+          }}
+        />
+        <SpotLoader mode="orbit" size={84} className="!gap-0 relative" />
+      </div>
+
+      <div
+        className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider font-semibold mb-2"
+        style={{ color: "#22C55E" }}
+      >
+        <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#22C55E]">
+          <span className="absolute inset-0 rounded-full bg-[#22C55E] opacity-50 animate-ping" />
+        </span>
+        Launch Plan Agent · live
+      </div>
+
+      <h1
+        className="text-[24px] font-semibold tracking-tight leading-tight max-w-[520px]"
+        style={{ color: "#F5F4EF" }}
+      >
+        Building a plan for{" "}
+        <span
+          style={{
+            background:
+              "linear-gradient(135deg, #C9A86A 0%, #E0C083 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}
+        >
+          {productName}
+        </span>
+      </h1>
+
+      {/* Cycling thought · key={idx} re-fires the slide-in keyframe */}
+      <div
+        key={idx}
+        className="mt-4 text-[14px] leading-relaxed max-w-[480px]"
+        style={{
+          color: "#A8A8A0",
+          animation: "findingSlide 320ms ease-out",
+          minHeight: "44px",
+        }}
+      >
+        {PLAN_THOUGHTS[idx]}
+      </div>
+
+      {/* Tiny progress dots · vague indicator that something's happening */}
+      <div className="flex items-center gap-1.5 mt-7">
+        {PLAN_THOUGHTS.map((_, i) => (
+          <span
+            key={i}
+            className="rounded-full transition-all duration-300"
+            style={{
+              width: i === idx ? "16px" : "4px",
+              height: "4px",
+              background: i <= idx ? "#C9A86A" : "#2A2A26",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Hard-coded launch plan template for brand-new products. Substitutes
+ *  the product name everywhere so the canvas isn't blank after the
+ *  user clicks "show me the plan". Themed for an EdTech course like
+ *  Guyju's Spoken English — applies cleanly to any new product the
+ *  user spins up in this demo. */
+function buildNewProductPlanMd(productName: string): string {
+  return `# ${productName} · Launch plan
+
+_Drafted just now · 14-day rollout · Conservative experiment_
+
+A small-budget, persona-led launch to learn what wins before we scale. Personas come first — once we know who we're targeting, media mix and creative briefs follow. One campaign per persona, three creative angles each, tight feedback loop on CPL and qualification.
+
+## Personas
+
+- **Working professional · Aspiring fluent speaker** · 25-34 · tier-1/2 cities · LinkedIn-active · pain: stalled career growth from English gap
+- **College student · Interview prep** · 18-24 · semi-urban · YouTube-heavy · pain: campus placement interviews
+- **Parent · Buying for child** · 32-45 · tier-2/3 cities · WhatsApp + Facebook · pain: child's school confidence
+
+## Phase 1 · Day 1-2 · Setup
+
+- Lock the 3 personas above + write briefs to product memory
+- Provision pixel + Conversion API for the brand site
+- Build 3 landing pages — one per persona
+- Wire Meta lead forms + WhatsApp click-to-chat
+- Connect CRM webhook for real-time lead delivery
+- Brief Voice Agent for outbound follow-ups
+
+## Phase 2 · Day 3-7 · Launch
+
+- Go live with 3 Meta campaigns · 1 per persona · ₹500/day each
+- Spin up Google Search on high-intent keywords · ₹400/day
+- Activate Google Discover for top-of-funnel reach · ₹300/day
+- Monitor CPL, qualification rate, and creative engagement daily
+
+## Phase 3 · Day 8-14 · Optimize
+
+- Pause ad sets with CPL > 2x target
+- Scale winners by 30% per 48h once CPL stabilises
+- Promote top creatives to broader audiences
+- Refresh fatigued creatives (frequency > 2.5)
+
+## Phase 4 · Day 15+ · Scale
+
+- Expand to 5 ad sets per persona on the winning angle
+- Test new persona variants from the audience graph
+- Open WhatsApp Business outreach to nurture cold leads
+- Brief the Voice Agent for warm-lead follow-ups
+
+## Budget
+
+- **Meta** · ₹1,500/day · ₹21,000 over 14 days
+- **Google Search** · ₹400/day · ₹5,600 over 14 days
+- **Google Discover** · ₹300/day · ₹4,200 over 14 days
+- **Total · 14 days** · ₹30,800
+- **Daily cap** · ₹2,200
+
+## Risks to monitor
+
+- Audience saturation in the top persona
+- Creative fatigue past 14 days
+- Landing page bounce > 60%
+- Lead-form drop-off > 40%
+
+---
+
+_Plan generated · Awaiting your approval · Edit any block in chat_
+`;
 }
 
 function PlanFileView({
@@ -354,19 +2399,58 @@ function PlanFileView({
   buildingOverlay: boolean;
 }) {
   const files = getProductFiles(workflow);
-  // New product · no plan yet, show a placeholder.
-  if (!files) {
+
+  // While Spot is "generating" the plan (step transitioned to
+  // launch-plan and tool-call is still running), show the cycling
+  // loader. The local timer matches the launch-plan tool-call
+  // delayMs (5.6s) so the loader stays up for exactly the agent run.
+  const [planBuilding, setPlanBuilding] = useState(
+    workflow.kind === "launch-campaign" && workflow.step === "launch-plan",
+  );
+  useEffect(() => {
+    if (
+      workflow.kind === "launch-campaign" &&
+      workflow.step === "launch-plan"
+    ) {
+      setPlanBuilding(true);
+      const id = setTimeout(() => setPlanBuilding(false), 11800);
+      return () => clearTimeout(id);
+    }
+    setPlanBuilding(false);
+  }, [workflow?.step, workflow?.kind]);
+
+  if (
+    planBuilding &&
+    workflow.kind === "launch-campaign"
+  ) {
+    return <PlanBuildingLoader productName={workflow.productName} />;
+  }
+
+  // New product (no saved files) post-build · render the generic
+  // template. Even brand-new products get a real plan to read,
+  // not a "No plan yet" placeholder.
+  if (!files && workflow.kind === "launch-campaign") {
+    const md = buildNewProductPlanMd(workflow.productName);
     return (
       <div className="relative">
-        <div className="px-6 py-5 max-w-[720px]">
-          <h1 className="text-[22px] font-semibold text-text-primary tracking-tight mt-0 mb-3">
-            Plan
-          </h1>
-          <p className="text-[13px] text-text-secondary leading-relaxed">
-            No plan yet. After deep research completes, Spot will draft the launch
-            plan here — a written, day-by-day timeline you can approve in chat.
-          </p>
+        <div className="px-6 py-5 max-w-[760px]">
+          <Markdown source={md} theme="dark" />
         </div>
+        {buildingOverlay && <BuildingOverlay label="Spot is drafting the plan…" />}
+      </div>
+    );
+  }
+
+  // Other workflow kinds without files (campaign-dive etc.) keep
+  // the calm empty state.
+  if (!files) {
+    return (
+      <div className="relative h-full">
+        <EmptyCanvas
+          icon={TrendingUp}
+          title="No plan yet"
+          body="Once the memory is approved, Spot will draft a day-by-day launch plan here — personas, media mix, creative briefs — for you to approve in chat."
+        />
         {buildingOverlay && <BuildingOverlay label="Spot is drafting the plan…" />}
       </div>
     );
@@ -376,7 +2460,7 @@ function PlanFileView({
   return (
     <div className="relative">
       <div className="px-6 py-5 max-w-[720px]">
-        <Markdown source={files.planMd} />
+        <Markdown source={files.planMd} theme="dark" />
       </div>
       {buildingOverlay && (
         <BuildingOverlay label="Spot is proposing plan changes…" />
@@ -389,7 +2473,11 @@ function DashboardFileView({ workflow }: { workflow: SpotWorkflow }) {
   const files = getProductFiles(workflow);
   if (!files) {
     return (
-      <EmptyFile label="No dashboard yet · campaigns haven't started." />
+      <EmptyCanvas
+        icon={ChartPie}
+        title="No dashboard yet"
+        body="Campaigns haven't started. Once Spot ships the plan and ads go live, real-time performance — spend, leads, CPL, channel mix — will fill in here."
+      />
     );
   }
   const perf = files.performance;
@@ -462,6 +2550,80 @@ function DashboardFileView({ workflow }: { workflow: SpotWorkflow }) {
   );
 }
 
+/* ─── Dummy assets for the new-product flow ──────────────────
+ * Used as placeholders until the user drops real generated
+ * creatives into /public/assets/creatives/. Each card renders the
+ * persona/angle name on a gradient background; if an image exists
+ * at the matching `src` path it'll be loaded instead.
+ * ────────────────────────────────────────────────────────────── */
+
+type DummyCreative = {
+  id: string;
+  title: string;
+  angle: string;
+  personaName: string;
+  channel: "Meta" | "Google" | "YouTube";
+  format: "1:1" | "4:5" | "9:16" | "16:9";
+  sizes: ("1:1" | "4:5" | "9:16" | "16:9")[];
+  kind: "image" | "video" | "carousel";
+  state: "ready" | "draft";
+  hue: number;
+  /** Optional · drop a file at this path inside /public to override
+   *  the gradient placeholder. */
+  src?: string;
+};
+
+const DUMMY_CREATIVES: DummyCreative[] = [
+  { id: "c01", title: "Speak confidently in 12 weeks", angle: "Outcome-led", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 28, src: "/assets/creatives/c01.png" },
+  { id: "c02", title: "Live cohort · Native trainers", angle: "Authority", personaName: "Working professional", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 42, src: "/assets/creatives/c02.png" },
+  { id: "c03", title: "Real conversation drills", angle: "Method", personaName: "Working professional", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 56, src: "/assets/creatives/c03.png" },
+  { id: "c04", title: "Crack any interview · 6 weeks", angle: "Outcome-led", personaName: "College student", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 200, src: "/assets/creatives/c04.png" },
+  { id: "c05", title: "From hesitation to fluent", angle: "Transformation", personaName: "College student", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 215, src: "/assets/creatives/c05.png" },
+  { id: "c06", title: "Mock interviews · weekly", angle: "Method", personaName: "College student", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 188, src: "/assets/creatives/c06.png" },
+  { id: "c07", title: "Help your child speak with confidence", angle: "Emotional", personaName: "Parent · buying for child", channel: "Meta", format: "1:1", sizes: ["1:1", "4:5"], kind: "image", state: "ready", hue: 340, src: "/assets/creatives/c07.png" },
+  { id: "c08", title: "Trusted by 12,000+ parents", angle: "Social proof", personaName: "Parent · buying for child", channel: "Meta", format: "4:5", sizes: ["1:1", "4:5", "9:16"], kind: "image", state: "ready", hue: 320, src: "/assets/creatives/c08.png" },
+  { id: "c09", title: "School-confidence in 8 weeks", angle: "Outcome-led", personaName: "Parent · buying for child", channel: "Meta", format: "9:16", sizes: ["9:16"], kind: "video", state: "ready", hue: 300, src: "/assets/creatives/c09.png" },
+  { id: "c10", title: "Try one free class", angle: "Trial-led", personaName: "Working professional", channel: "YouTube", format: "16:9", sizes: ["16:9"], kind: "video", state: "ready", hue: 12, src: "/assets/creatives/c10.png" },
+  { id: "c11", title: "Speak in 8 weeks · ₹0 risk", angle: "Risk-reversal", personaName: "College student", channel: "YouTube", format: "16:9", sizes: ["16:9"], kind: "video", state: "ready", hue: 230, src: "/assets/creatives/c11.png" },
+  { id: "c12", title: "Built for working pros", angle: "Positioning", personaName: "Working professional", channel: "Meta", format: "1:1", sizes: ["1:1"], kind: "carousel", state: "draft", hue: 70, src: "/assets/creatives/c12.png" },
+];
+
+const DUMMY_SEARCH_ADS: {
+  id: string;
+  campaign: "Brand" | "Category" | "Competitor";
+  primaryHeadline: string;
+  primaryDescription: string;
+  keywords: string;
+  status: "live" | "draft";
+}[] = [
+  { id: "sa01", campaign: "Brand", primaryHeadline: "{Product} · Speak Confidently · Live Cohort", primaryDescription: "Native trainers, real conversation drills, mock interviews. Free trial class.", keywords: "guyju spoken english, guyju's spoken english", status: "live" },
+  { id: "sa02", campaign: "Category", primaryHeadline: "Best Spoken English Course Online", primaryDescription: "Live cohort with native trainers. Outcomes-led syllabus. 12-week program.", keywords: "best spoken english course, spoken english classes online", status: "live" },
+  { id: "sa03", campaign: "Competitor", primaryHeadline: "Smarter Than {Competitor}? You Decide", primaryDescription: "Live cohorts vs. recorded videos. Side-by-side comparison.", keywords: "{competitor} alternative, {competitor} review", status: "draft" },
+];
+
+const DUMMY_LANDING_PAGES: {
+  id: string;
+  title: string;
+  personaName: string;
+  sections: number;
+  status: "live" | "draft";
+}[] = [
+  { id: "lp01", title: "Working professional · landing", personaName: "Working professional", sections: 9, status: "live" },
+  { id: "lp02", title: "College student · landing", personaName: "College student", sections: 8, status: "live" },
+  { id: "lp03", title: "Parent · landing", personaName: "Parent · buying for child", sections: 9, status: "live" },
+];
+
+const DUMMY_FORMS: {
+  id: string;
+  title: string;
+  kind: "lead-form" | "click-to-whatsapp" | "phone-form";
+  personaName: string;
+  fields: number;
+}[] = [
+  { id: "fm01", title: "Free trial signup", kind: "lead-form", personaName: "Working professional", fields: 4 },
+  { id: "fm02", title: "WhatsApp me about classes", kind: "click-to-whatsapp", personaName: "Parent · buying for child", fields: 2 },
+];
+
 function AssetsFileView({
   workflow,
   buildingOverlay,
@@ -470,28 +2632,790 @@ function AssetsFileView({
   buildingOverlay: boolean;
 }) {
   const files = getProductFiles(workflow);
-  if (!files) {
-    return <EmptyFile label="No assets yet · Spot writes them here after the plan is approved." />;
-  }
-  const { creatives, searchAds, landingPages, forms } = files.assets;
+
+  // Source the data — existing products use the real memory file,
+  // new products fall through to the dummy data so the assets tab
+  // is never empty.
+  const creatives = files?.assets.creatives
+    ? files.assets.creatives.map((c) => ({
+        id: c.id,
+        title: c.label,
+        angle: "Pre-built",
+        personaName: c.personaName,
+        channel: "Meta" as const,
+        format: c.format,
+        sizes: c.sizes,
+        kind: c.kind,
+        state: c.state === "live" ? ("ready" as const) : ("draft" as const),
+        hue: c.hue,
+        src: undefined as string | undefined,
+      }))
+    : DUMMY_CREATIVES;
+  const searchAds = files?.assets.searchAds
+    ? files.assets.searchAds.map((s) => ({
+        id: s.id,
+        campaign: s.campaign,
+        primaryHeadline: s.primaryHeadline,
+        primaryDescription: s.primaryDescription,
+        keywords: s.keywords,
+        status: s.status,
+      }))
+    : DUMMY_SEARCH_ADS;
+  const landingPages = files?.assets.landingPages
+    ? files.assets.landingPages.map((p) => ({
+        id: p.id,
+        title: p.title,
+        personaName: p.personaName,
+        sections: p.sections,
+        status: p.status,
+      }))
+    : DUMMY_LANDING_PAGES;
+  const forms = files?.assets.forms
+    ? files.assets.forms.map((f) => ({
+        id: f.id,
+        title: f.title,
+        kind: f.kind,
+        personaName: f.personaName,
+        fields: f.fields,
+      }))
+    : DUMMY_FORMS;
+
+  const productSlug = files?.productId ?? "new-product";
+
   return (
-    <div className="relative">
+    <div className="relative" style={{ color: "#F5F4EF" }}>
       <div className="px-6 py-5">
-        <h1 className="text-[22px] font-semibold text-text-primary tracking-tight mt-0 mb-1">
-          Assets
-        </h1>
-        <p className="text-[12px] text-text-secondary mb-4">
-          {creatives.length} creatives · {searchAds.length} search ads · {landingPages.length} landing
-          pages · {forms.length} forms
-        </p>
-        <a
-          href="/memory"
-          className="inline-flex items-center gap-1 text-[11.5px] text-text-tertiary hover:text-text-primary"
-        >
-          See full asset library in Memory → Assets
-        </a>
+        {/* Header */}
+        <div className="mb-5">
+          <div
+            className="text-[11px] mb-0.5"
+            style={{ color: "#8A8980" }}
+          >
+            assets /
+          </div>
+          <h1
+            className="text-[24px] font-semibold tracking-tight"
+            style={{ color: "#F5F4EF" }}
+          >
+            {workflow.kind === "campaign-dive"
+              ? workflow.productName
+              : (workflow as LaunchWorkflow).productName || "New product"}
+          </h1>
+          <div
+            className="text-[12px] mt-1"
+            style={{ color: "#A8A8A0" }}
+          >
+            <span style={{ color: "#F5F4EF", fontWeight: 500 }}>
+              {creatives.length}
+            </span>{" "}
+            creatives ·{" "}
+            <span style={{ color: "#F5F4EF", fontWeight: 500 }}>
+              {searchAds.length}
+            </span>{" "}
+            search ads ·{" "}
+            <span style={{ color: "#F5F4EF", fontWeight: 500 }}>
+              {landingPages.length}
+            </span>{" "}
+            landing pages ·{" "}
+            <span style={{ color: "#F5F4EF", fontWeight: 500 }}>
+              {forms.length}
+            </span>{" "}
+            forms
+          </div>
+          {!files && (
+            <div
+              className="text-[11px] mt-2 leading-relaxed"
+              style={{ color: "#8A8980" }}
+            >
+              Placeholders below — drop real files into{" "}
+              <code
+                className="text-[10.5px] font-mono px-1 rounded"
+                style={{
+                  background: "#1F1F1D",
+                  border: "1px solid #2E2E2A",
+                  color: "#E8E0C8",
+                }}
+              >
+                /public/assets/creatives/
+              </code>{" "}
+              to replace.
+            </div>
+          )}
+        </div>
+
+        {/* Creatives grid · square thumbs, 4 per row, view-sizes per card */}
+        <SectionHeading title="Creatives" count={creatives.length} />
+        <div className="grid grid-cols-4 gap-3 mb-7">
+          {creatives.map((c) => (
+            <CreativeCard key={c.id} creative={c} productSlug={productSlug} />
+          ))}
+        </div>
+
+        {/* Search ads */}
+        <SectionHeading title="Search ads" count={searchAds.length} />
+        <div className="space-y-2.5 mb-7">
+          {searchAds.map((s) => (
+            <SearchAdRow key={s.id} ad={s} />
+          ))}
+        </div>
+
+        {/* Landing pages */}
+        <SectionHeading title="Landing pages" count={landingPages.length} />
+        <div className="grid grid-cols-3 gap-3 mb-7">
+          {landingPages.map((p) => (
+            <LandingPageCard key={p.id} page={p} />
+          ))}
+        </div>
+
+        {/* Forms */}
+        <SectionHeading title="Forms" count={forms.length} />
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          {forms.map((f) => (
+            <FormCard key={f.id} form={f} />
+          ))}
+        </div>
       </div>
       {buildingOverlay && <BuildingOverlay label="Spot is generating creatives…" />}
+    </div>
+  );
+}
+
+function SectionHeading({ title, count }: { title: string; count: number }) {
+  return (
+    <div
+      className="flex items-baseline gap-2 mb-3 pb-1.5"
+      style={{ borderBottom: "1px solid #262623" }}
+    >
+      <span
+        className="w-1 h-1 rounded-full"
+        style={{ background: "#C9A86A" }}
+      />
+      <span
+        className="text-[14px] font-semibold"
+        style={{ color: "#F5F4EF" }}
+      >
+        {title}
+      </span>
+      <span className="text-[11px]" style={{ color: "#8A8980" }}>
+        {count}
+      </span>
+    </div>
+  );
+}
+
+/** Creative card · dark-mode card with a square (1:1) thumbnail
+ *  showing the concept, regardless of the creative's source format.
+ *  A small "View sizes" pill in the corner opens a modal that
+ *  shows the creative rendered in every available size variant. */
+function CreativeCard({
+  creative,
+  productSlug,
+}: {
+  creative: DummyCreative;
+  productSlug: string;
+}) {
+  const [sizesOpen, setSizesOpen] = useState(false);
+  const gradientBg = `linear-gradient(135deg, hsl(${creative.hue}, 65%, 70%) 0%, hsl(${creative.hue}, 55%, 55%) 60%, hsl(${(creative.hue + 30) % 360}, 60%, 45%) 100%)`;
+
+  return (
+    <>
+      <div
+        className="group rounded-card overflow-hidden transition-colors"
+        style={{
+          background: "#1A1A18",
+          border: "1px solid #262623",
+        }}
+      >
+        {/* Always 1:1 thumbnail */}
+        <div className="relative w-full" style={{ background: gradientBg }}>
+          <div style={{ paddingTop: "100%" }} aria-hidden />
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+            {creative.src && (
+              <img
+                src={creative.src}
+                alt={creative.title}
+                className="absolute inset-0 w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            )}
+            <div className="relative z-10 px-2">
+              <div
+                className="text-[10px] uppercase tracking-wider font-semibold mb-1.5 drop-shadow-sm"
+                style={{ color: "rgba(255,255,255,0.88)" }}
+              >
+                {creative.angle}
+              </div>
+              <div
+                className="text-[13px] font-semibold leading-snug drop-shadow-sm"
+                style={{ color: "#FFFFFF" }}
+              >
+                {creative.title}
+              </div>
+            </div>
+          </div>
+
+          {/* Kind badge (Video / Carousel) top-left */}
+          {creative.kind !== "image" && (
+            <div className="absolute top-2 left-2">
+              <span
+                className="inline-flex items-center h-5 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider"
+                style={{
+                  background: "rgba(0,0,0,0.55)",
+                  color: "#FFFFFF",
+                  backdropFilter: "blur(4px)",
+                }}
+              >
+                {creative.kind}
+              </span>
+            </div>
+          )}
+
+          {/* View sizes pill · top-right · opens modal */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSizesOpen(true);
+            }}
+            className="absolute top-2 right-2 inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] font-medium transition-opacity"
+            style={{
+              background: "rgba(0,0,0,0.6)",
+              color: "#FFFFFF",
+              backdropFilter: "blur(6px)",
+            }}
+            title="View this creative in all available sizes"
+          >
+            <Maximize2 size={9} strokeWidth={1.8} />
+            {creative.sizes.length} sizes
+          </button>
+
+          {/* Status pill bottom-right */}
+          <div className="absolute bottom-2 right-2">
+            <span
+              className="inline-flex items-center h-5 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider font-semibold"
+              style={
+                creative.state === "ready"
+                  ? { background: "#22C55E", color: "#0A1F14" }
+                  : {
+                      background: "#1A1A18",
+                      color: "#D4B566",
+                      border: "1px solid #3A3530",
+                    }
+              }
+            >
+              {creative.state}
+            </span>
+          </div>
+        </div>
+
+        {/* Card footer · dark surface, light text */}
+        <div
+          className="px-3 py-2.5"
+          style={{ borderTop: "1px solid #262623" }}
+        >
+          <div className="flex items-center gap-1.5 mb-1">
+            <span
+              className="text-[11px] font-medium truncate flex-1"
+              style={{ color: "#F5F4EF" }}
+            >
+              {creative.personaName}
+            </span>
+            <span
+              className="text-[10px] tabular flex-shrink-0"
+              style={{ color: "#8A8980" }}
+            >
+              {creative.channel}
+            </span>
+          </div>
+          <div
+            className="text-[9.5px] mt-0.5 font-mono truncate"
+            style={{ color: "#7A7970" }}
+          >
+            {productSlug}/{creative.id}
+          </div>
+        </div>
+      </div>
+
+      {sizesOpen && (
+        <CreativeSizesModal
+          creative={creative}
+          gradientBg={gradientBg}
+          productSlug={productSlug}
+          onClose={() => setSizesOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** Modal showing one creative concept across all available size
+ *  variants side-by-side · square / portrait / story / landscape.
+ *  Dark backdrop, dark surface, gold accents to match the canvas. */
+function CreativeSizesModal({
+  creative,
+  gradientBg,
+  productSlug,
+  onClose,
+}: {
+  creative: DummyCreative;
+  gradientBg: string;
+  productSlug: string;
+  onClose: () => void;
+}) {
+  const ratioFor = (fmt: DummyCreative["format"]) => {
+    switch (fmt) {
+      case "1:1":
+        return "100%";
+      case "4:5":
+        return "125%";
+      case "9:16":
+        return "177.77%";
+      case "16:9":
+        return "56.25%";
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-8"
+      style={{
+        background: "rgba(0,0,0,0.7)",
+        backdropFilter: "blur(6px)",
+      }}
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[1080px] max-h-[90vh] rounded-card overflow-hidden flex flex-col"
+        style={{
+          background: "#161614",
+          border: "1px solid #2A2A26",
+          boxShadow: "0 28px 64px -16px rgba(0,0,0,0.6)",
+        }}
+      >
+        {/* Modal header */}
+        <div
+          className="px-5 py-4 flex items-center gap-3"
+          style={{ borderBottom: "1px solid #262623" }}
+        >
+          <div className="flex-1 min-w-0">
+            <div
+              className="text-[10.5px] uppercase tracking-wider font-semibold"
+              style={{ color: "#C9A86A" }}
+            >
+              {creative.angle}
+            </div>
+            <div
+              className="text-[16px] font-semibold leading-snug"
+              style={{ color: "#F5F4EF" }}
+            >
+              {creative.title}
+            </div>
+            <div
+              className="text-[11px] mt-0.5"
+              style={{ color: "#8A8980" }}
+            >
+              {creative.personaName} · {creative.channel} ·{" "}
+              <span className="font-mono">
+                {productSlug}/{creative.id}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-white/5"
+            style={{ color: "#A8A8A0" }}
+          >
+            <X size={14} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        {/* Sizes grid · variant tiles laid out by aspect ratio */}
+        <div
+          className="flex-1 overflow-y-auto px-5 py-5"
+          style={{ background: "#0F0F0E" }}
+        >
+          <div className="grid grid-cols-4 gap-4 items-start">
+            {creative.sizes.map((sz) => {
+              const isPrimary = sz === creative.format;
+              return (
+                <div
+                  key={sz}
+                  className="rounded-card overflow-hidden flex flex-col"
+                  style={{
+                    background: "#1A1A18",
+                    border: isPrimary
+                      ? "1px solid #C9A86A"
+                      : "1px solid #262623",
+                  }}
+                >
+                  <div className="relative w-full" style={{ background: gradientBg }}>
+                    <div style={{ paddingTop: ratioFor(sz) }} aria-hidden />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+                      {creative.src && (
+                        <img
+                          src={creative.src}
+                          alt={creative.title}
+                          className="absolute inset-0 w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                          }}
+                        />
+                      )}
+                      <div className="relative z-10 px-1">
+                        <div
+                          className="text-[9px] uppercase tracking-wider font-semibold mb-1 drop-shadow-sm"
+                          style={{ color: "rgba(255,255,255,0.85)" }}
+                        >
+                          {creative.angle}
+                        </div>
+                        <div
+                          className="text-[11.5px] font-semibold leading-snug drop-shadow-sm"
+                          style={{ color: "#FFFFFF" }}
+                        >
+                          {creative.title}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="absolute top-1.5 left-1.5">
+                      <span
+                        className="inline-flex items-center h-5 px-1.5 rounded-full text-[10px] font-mono tabular"
+                        style={{
+                          background: "rgba(0,0,0,0.55)",
+                          color: "#FFFFFF",
+                          backdropFilter: "blur(4px)",
+                        }}
+                      >
+                        {sz}
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    className="px-2.5 py-2 flex items-center gap-1.5"
+                    style={{ borderTop: "1px solid #262623" }}
+                  >
+                    <span
+                      className="text-[10.5px] font-mono"
+                      style={{ color: "#A8A8A0" }}
+                    >
+                      {sz}
+                    </span>
+                    {isPrimary && (
+                      <span
+                        className="text-[9px] uppercase tracking-wider font-semibold"
+                        style={{ color: "#C9A86A" }}
+                      >
+                        primary
+                      </span>
+                    )}
+                    <span className="flex-1" />
+                    <span
+                      className="text-[10px] font-mono"
+                      style={{ color: "#7A7970" }}
+                    >
+                      {sz === "1:1"
+                        ? "1080×1080"
+                        : sz === "4:5"
+                          ? "1080×1350"
+                          : sz === "9:16"
+                            ? "1080×1920"
+                            : "1920×1080"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Search ad row · mimics a Google search result so the user can
+ *  scan the headline/description at a glance. */
+function SearchAdRow({
+  ad,
+}: {
+  ad: {
+    id: string;
+    campaign: "Brand" | "Category" | "Competitor";
+    primaryHeadline: string;
+    primaryDescription: string;
+    keywords: string;
+    status: "live" | "draft";
+  };
+}) {
+  return (
+    <div
+      className="rounded-card p-3.5"
+      style={{
+        background: "#1A1A18",
+        border: "1px solid #262623",
+      }}
+    >
+      <div className="flex items-center gap-1.5 mb-2">
+        <span
+          className="inline-flex items-center h-4 px-1.5 rounded text-[9.5px] uppercase tracking-wider font-semibold"
+          style={{
+            background: "#26261F",
+            border: "1px solid #3A3530",
+            color: "#D4B566",
+          }}
+        >
+          {ad.campaign}
+        </span>
+        <span
+          className="inline-flex items-center h-4 px-1.5 rounded text-[9.5px] uppercase tracking-wider font-semibold"
+          style={
+            ad.status === "live"
+              ? {
+                  background: "#0E2A1A",
+                  border: "1px solid #1A4D2A",
+                  color: "#34D399",
+                }
+              : {
+                  background: "#1F1F1D",
+                  border: "1px solid #2E2E2A",
+                  color: "#8A8980",
+                }
+          }
+        >
+          {ad.status}
+        </span>
+        <span className="flex-1" />
+        <span
+          className="text-[9.5px] font-mono truncate max-w-[40%]"
+          style={{ color: "#7A7970" }}
+        >
+          {ad.keywords}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-1.5 mb-1">
+        <span
+          className="text-[10.5px] uppercase tracking-wider font-semibold"
+          style={{ color: "#8A8980" }}
+        >
+          Ad
+        </span>
+        <span
+          className="text-[10.5px] truncate"
+          style={{ color: "#8A8980" }}
+        >
+          guyju.com/spoken-english
+        </span>
+      </div>
+      <div
+        className="text-[14.5px] font-medium leading-snug hover:underline cursor-pointer"
+        style={{ color: "#93C5FD" }}
+      >
+        {ad.primaryHeadline}
+      </div>
+      <div
+        className="text-[12.5px] leading-relaxed mt-1"
+        style={{ color: "#B8B7B0" }}
+      >
+        {ad.primaryDescription}
+      </div>
+    </div>
+  );
+}
+
+/** Landing page mock thumbnail · stacked grayscale rectangles that
+ *  represent sections. Reads as a tiny page preview. */
+function LandingPageCard({
+  page,
+}: {
+  page: {
+    id: string;
+    title: string;
+    personaName: string;
+    sections: number;
+    status: "live" | "draft";
+  };
+}) {
+  return (
+    <div
+      className="rounded-card overflow-hidden transition-colors"
+      style={{
+        background: "#1A1A18",
+        border: "1px solid #262623",
+      }}
+    >
+      <div
+        className="relative h-32 px-3 py-3 flex flex-col gap-1.5"
+        style={{
+          background:
+            "linear-gradient(180deg, #2A2520 0%, #1F1B16 50%, #15110D 100%)",
+        }}
+      >
+        <div
+          className="h-2 w-3/4 rounded"
+          style={{ background: "rgba(245, 244, 239, 0.18)" }}
+        />
+        <div
+          className="h-3 w-5/6 rounded"
+          style={{ background: "rgba(245, 244, 239, 0.22)" }}
+        />
+        <div
+          className="h-6 w-full rounded"
+          style={{ background: "rgba(201, 168, 106, 0.45)" }}
+        />
+        <div className="grid grid-cols-3 gap-1 flex-1">
+          <div
+            className="rounded"
+            style={{ background: "rgba(245, 244, 239, 0.12)" }}
+          />
+          <div
+            className="rounded"
+            style={{ background: "rgba(245, 244, 239, 0.12)" }}
+          />
+          <div
+            className="rounded"
+            style={{ background: "rgba(245, 244, 239, 0.12)" }}
+          />
+        </div>
+        <span
+          className="absolute top-2 right-2 inline-flex items-center h-4 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider font-semibold"
+          style={
+            page.status === "live"
+              ? { background: "#22C55E", color: "#0A1F14" }
+              : {
+                  background: "#1A1A18",
+                  color: "#D4B566",
+                  border: "1px solid #3A3530",
+                }
+          }
+        >
+          {page.status}
+        </span>
+      </div>
+      <div
+        className="px-3 py-2.5"
+        style={{ borderTop: "1px solid #262623" }}
+      >
+        <div
+          className="text-[12.5px] font-medium truncate"
+          style={{ color: "#F5F4EF" }}
+        >
+          {page.title}
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span
+            className="text-[11px] truncate flex-1"
+            style={{ color: "#A8A8A0" }}
+          >
+            {page.personaName}
+          </span>
+          <span
+            className="text-[10px] tabular"
+            style={{ color: "#7A7970" }}
+          >
+            {page.sections} sections
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Form card · phone-frame preview with stacked field skeletons. */
+function FormCard({
+  form,
+}: {
+  form: {
+    id: string;
+    title: string;
+    kind: "lead-form" | "click-to-whatsapp" | "phone-form";
+    personaName: string;
+    fields: number;
+  };
+}) {
+  return (
+    <div
+      className="rounded-card overflow-hidden transition-colors"
+      style={{
+        background: "#1A1A18",
+        border: "1px solid #262623",
+      }}
+    >
+      <div
+        className="px-4 py-4 flex items-start gap-3"
+        style={{
+          background:
+            "linear-gradient(180deg, #1F1F1D 0%, #17171500 100%)",
+        }}
+      >
+        {/* Phone frame */}
+        <div className="w-16 flex-shrink-0">
+          <div
+            className="rounded-md overflow-hidden p-1.5 space-y-1"
+            style={{
+              background: "#26261F",
+              border: "1px solid #3A3530",
+            }}
+          >
+            <div
+              className="h-1.5 w-full rounded-sm"
+              style={{ background: "#1A1A18" }}
+            />
+            <div
+              className="h-2.5 w-full rounded-sm"
+              style={{ background: "#1A1A18" }}
+            />
+            <div
+              className="h-2.5 w-full rounded-sm"
+              style={{ background: "#1A1A18" }}
+            />
+            <div
+              className="h-2.5 w-full rounded-sm"
+              style={{ background: "#1A1A18" }}
+            />
+            <div
+              className="h-3 w-full rounded-sm"
+              style={{ background: "rgba(201, 168, 106, 0.6)" }}
+            />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div
+            className="text-[12.5px] font-medium leading-snug"
+            style={{ color: "#F5F4EF" }}
+          >
+            {form.title}
+          </div>
+          <div
+            className="text-[11px] mt-0.5 truncate"
+            style={{ color: "#A8A8A0" }}
+          >
+            {form.personaName}
+          </div>
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            <span
+              className="inline-flex items-center h-4 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider font-semibold"
+              style={{
+                background: "#26261F",
+                border: "1px solid #3A3530",
+                color: "#D4B566",
+              }}
+            >
+              {form.kind.replace("-", " ")}
+            </span>
+            <span
+              className="text-[10px] tabular"
+              style={{ color: "#7A7970" }}
+            >
+              {form.fields} fields
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -513,6 +3437,35 @@ function EmptyFile({ label }: { label: string }) {
   return (
     <div className="h-full flex items-center justify-center px-8 py-16 text-center">
       <div className="text-[13px] text-text-tertiary">{label}</div>
+    </div>
+  );
+}
+
+/**
+ * Polished empty state for tabs that don't have content yet during a
+ * new-product workflow. Soft circular icon + heading + one-line copy,
+ * centred in the canvas. Replaces the plain "No X yet" text walls.
+ */
+function EmptyCanvas({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: typeof FileText;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center px-8 py-16 text-center">
+      <div className="w-12 h-12 rounded-full bg-[#FAF8F2] border border-[#E8E3D5] flex items-center justify-center mb-4">
+        <Icon size={18} strokeWidth={1.6} className="text-text-secondary" />
+      </div>
+      <div className="text-[15px] font-semibold text-text-primary mb-1.5">
+        {title}
+      </div>
+      <div className="text-[12.5px] text-text-secondary leading-relaxed max-w-[360px]">
+        {body}
+      </div>
     </div>
   );
 }

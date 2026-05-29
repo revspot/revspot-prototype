@@ -22,6 +22,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowUpRight,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -37,7 +38,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { Variants } from "framer-motion";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSpotStore } from "@/lib/spot/store";
 import { SpotMark } from "@/components/spot/spot-mark";
 import { SpotLoader, SpotFullscreen } from "@/components/spot/spot-loader";
@@ -156,7 +157,7 @@ const SIGNAL_TONE: Record<
   neutral: { pill: "pill", label: "Underspent", ring: "bg-surface-secondary", icon: Activity },
 };
 
-function AnalyzeStep({ workflow }: { workflow: DiagnosticWorkflow }) {
+export function AnalyzeStep({ workflow }: { workflow: DiagnosticWorkflow }) {
   // Wait for the agentic step to finish before revealing the analysis.
   if (!workflow.ready) {
     return <AnalyzeLoader />;
@@ -915,13 +916,91 @@ function PlanLoader() {
  *   · Upcoming decision date
  * ═══════════════════════════════════════════════════════════════ */
 
+/** Hard-coded "what changed" diff per diagnostic workflow kind. Lets
+ *  the LiveStep open with a concrete delta of the user's update vs
+ *  the previous plan, instead of leaving them to guess. */
+const PLAN_DELTA: Record<
+  "scale" | "optimize" | "test-angles",
+  {
+    summary: string;
+    changes: { kind: "new" | "updated" | "removed"; text: string }[];
+  }
+> = {
+  scale: {
+    summary:
+      "I've folded your scale picks into the existing plan. The winning ad sets get more budget and lookalike expansions; the decay units get trimmed.",
+    changes: [
+      { kind: "new", text: "Scale up Class 11 LAL ad set by 2× over Week 1" },
+      { kind: "new", text: "Add 1% lookalike expansion on the top mentor-led hook" },
+      { kind: "updated", text: "Daily cap raised · ₹8K → ₹16K on the winners" },
+      { kind: "removed", text: "Dropped the chronic-decay 'parents see weekly progress' line" },
+    ],
+  },
+  optimize: {
+    summary:
+      "I've added the fix list to the existing plan — pause the broken units first, then ship the refresh briefs, then swap audiences where saturation is high.",
+    changes: [
+      { kind: "new", text: "Pause the fatigued 'Parents see weekly progress' Reel" },
+      { kind: "new", text: "Brief Creative Agent on 2 new NEET hooks · mentor-led + biology-first" },
+      { kind: "updated", text: "Re-frame: 'parents see' → 'your kid tracks their own progress'" },
+      { kind: "updated", text: "Rewrite the Foundation creative brief · enforce the memory constraint" },
+    ],
+  },
+  "test-angles": {
+    summary:
+      "I've added a 6-angle Persona × Angle test matrix to the plan. Each angle gets equal budget for the learn window; early-stop guardrail will cut losers.",
+    changes: [
+      { kind: "new", text: "Add 6 new angles · 3 personas × 2 hooks each" },
+      { kind: "new", text: "Set 50/50 traffic split across angles within each ad set" },
+      { kind: "updated", text: "Learn window · 7 days minimum before any pause" },
+      { kind: "updated", text: "Daily cap held at ₹6K/angle to keep the test honest" },
+    ],
+  },
+};
+
+/** Animated task list that progresses queued → running → done over
+ *  real seconds. Replaces the previous "i < 2 means done" hack so
+ *  the live state actually feels like Spot working in the background. */
+function useAnimatedTasks(taskCount: number, taskDurationMs = 6000) {
+  const [doneCount, setDoneCount] = useState(0);
+  const [progress, setProgress] = useState(2);
+  const TOTAL = Math.max(1, taskCount) * taskDurationMs;
+  useEffect(() => {
+    setDoneCount(0);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < taskCount; i++) {
+      timers.push(setTimeout(() => setDoneCount(i + 1), (i + 1) * taskDurationMs));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [taskCount, taskDurationMs]);
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(99, (elapsed / TOTAL) * 100);
+      setProgress(pct);
+      if (pct >= 99) clearInterval(id);
+    }, 80);
+    return () => clearInterval(id);
+  }, [TOTAL]);
+  return { doneCount, progress };
+}
+
 function LiveStep({ workflow }: { workflow: DiagnosticWorkflow }) {
   const plan = planFor(workflow.kind);
   const activePhase = plan.phases[0]; // Always start on phase 1.
-  // Surface recommendations for this product if any exist.
-  const recs = PENDING_RECOMMENDATIONS.filter(
-    (r) => r.sourceKind === workflow.kind && r.sourceProduct === workflow.productName,
-  );
+  const delta = PLAN_DELTA[workflow.kind];
+  const { doneCount, progress } = useAnimatedTasks(activePhase.actions.length, 5500);
+  const allDone = doneCount >= activePhase.actions.length;
+  // Surface recommendations for this product if any exist · we hold
+  // these back until the initial task list has finished so the user
+  // sees Spot work through the queue first, then the next decisions.
+  const recs = allDone
+    ? PENDING_RECOMMENDATIONS.filter(
+        (r) =>
+          r.sourceKind === workflow.kind && r.sourceProduct === workflow.productName,
+      )
+    : [];
 
   return (
     <motion.div className="px-5 py-5" initial="hidden" animate="show" variants={canvasStagger}>
@@ -931,15 +1010,67 @@ function LiveStep({ workflow }: { workflow: DiagnosticWorkflow }) {
             <span className="absolute inset-0 rounded-full bg-[#22C55E] opacity-50 animate-ping" />
           </span>
           <span className="text-[11.5px] uppercase tracking-wider text-[#15803D] font-semibold">
-            Plan live · day 1 of 17
+            {allDone ? "Plan live · monitoring" : "Plan updated · Spot is working on it"}
           </span>
         </div>
-        <h2 className="text-section-header text-text-primary">{activePhase.title}</h2>
-        <p className="text-meta text-text-secondary mt-1 max-w-[640px]">
-          Week 1 of 3 · {activePhase.dates}. I'll ping you at the next decision date{" "}
-          <span className="text-text-primary font-medium">{activePhase.decisionAt}</span>{" "}
-          with what to approve.
+        <h2 className="text-section-header text-text-primary">
+          {workflow.kind === "scale"
+            ? "Scale plan updated"
+            : workflow.kind === "optimize"
+              ? "Optimization plan updated"
+              : "Angle-test plan updated"}{" "}
+          · {workflow.productName}
+        </h2>
+        <p className="text-meta text-text-secondary mt-1 max-w-[680px]">
+          {delta.summary}
         </p>
+      </motion.div>
+
+      {/* ── What changed · concrete delta vs the previous plan ── */}
+      <motion.div
+        variants={canvasReveal}
+        className="bg-white border border-border rounded-card p-4 mb-3"
+      >
+        <div className="flex items-center gap-1.5 mb-3">
+          <span className="text-[12px]" aria-hidden>
+            ✏️
+          </span>
+          <div className="label-section">What changed</div>
+          <span className="text-[10.5px] text-text-tertiary ml-auto">
+            {delta.changes.length} updates · merged into plan.md
+          </span>
+        </div>
+        <ul className="space-y-1.5">
+          {delta.changes.map((c, i) => (
+            <li key={i} className="flex items-start gap-2 text-[12.5px]">
+              <span
+                className="inline-flex items-center h-4 px-1.5 rounded-full text-[9.5px] uppercase tracking-wider font-semibold flex-shrink-0 mt-0.5"
+                style={
+                  c.kind === "new"
+                    ? {
+                        background: "#0E2A1A",
+                        color: "#34D399",
+                        border: "1px solid #1A4D2A",
+                      }
+                    : c.kind === "updated"
+                      ? {
+                          background: "#102A2A",
+                          color: "#67E8F9",
+                          border: "1px solid #1A4D4D",
+                        }
+                      : {
+                          background: "#2A1010",
+                          color: "#F87171",
+                          border: "1px solid #4D1A1A",
+                        }
+                }
+              >
+                {c.kind}
+              </span>
+              <span className="text-text-primary leading-relaxed flex-1">{c.text}</span>
+            </li>
+          ))}
+        </ul>
       </motion.div>
 
       {/* Phase timeline strip */}
@@ -977,42 +1108,132 @@ function LiveStep({ workflow }: { workflow: DiagnosticWorkflow }) {
         </div>
       </motion.div>
 
-      {/* What's running now */}
-      <motion.div variants={canvasReveal} className="bg-white border border-border rounded-card p-4 mb-3">
+      {/* ── Tasks running now · animated queued → running → done ── */}
+      <motion.div
+        variants={canvasReveal}
+        className="bg-white border border-border rounded-card p-4 mb-3"
+      >
         <div className="flex items-center gap-1.5 mb-3">
-          <Activity size={13} strokeWidth={1.7} className="text-text-secondary" />
-          <div className="label-section">Running now</div>
-          <span className="text-[10.5px] text-text-tertiary ml-auto">
-            Auto-deployed when you approved
+          {allDone ? (
+            <CheckCircle2 size={13} strokeWidth={2} className="text-[#15803D]" />
+          ) : (
+            <Activity size={13} strokeWidth={1.7} className="text-text-secondary" />
+          )}
+          <div className="label-section">
+            {allDone ? "Week 1 deployed" : "Spot is working through the queue"}
+          </div>
+          <span className="text-[10.5px] text-text-tertiary ml-auto tabular">
+            {doneCount} of {activePhase.actions.length} tasks complete
           </span>
         </div>
+
+        {/* Progress bar */}
+        <div className="mb-3.5">
+          <div
+            className="relative h-1.5 rounded-full overflow-hidden"
+            style={{ background: "rgba(255,255,255,0.06)" }}
+          >
+            <div
+              className="h-full transition-all duration-300 ease-out relative"
+              style={{
+                width: `${progress}%`,
+                background:
+                  "linear-gradient(90deg, #C9A86A 0%, #E0C083 60%, #22C55E 100%)",
+              }}
+            >
+              {!allDone && (
+                <span
+                  aria-hidden
+                  className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full"
+                  style={{
+                    background: "#22C55E",
+                    boxShadow:
+                      "0 0 14px 3px rgba(34, 197, 94, 0.55), 0 0 4px rgba(255,255,255,0.4)",
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+
         <ul className="space-y-2">
           {activePhase.actions.map((a, i) => {
-            // Treat first two as already executed, rest as queued — gives
-            // the live state a sense of motion.
-            const status = i < 2 ? "done" : "queued";
+            const done = i < doneCount;
+            const running = i === doneCount;
+            const queued = i > doneCount;
             return (
-              <li key={i} className="flex gap-2.5 text-[12.5px] items-start">
-                {status === "done" ? (
-                  <CheckCircle2 size={12} strokeWidth={2} className="text-[#15803D] flex-shrink-0 mt-0.5" />
-                ) : (
-                  <Clock size={12} strokeWidth={1.7} className="text-text-tertiary flex-shrink-0 mt-0.5" />
+              <li
+                key={i}
+                className="flex gap-2.5 text-[12.5px] items-start py-1 transition-colors"
+              >
+                {done && (
+                  <CheckCircle2
+                    size={13}
+                    strokeWidth={2}
+                    className="text-[#15803D] flex-shrink-0 mt-0.5"
+                  />
+                )}
+                {running && (
+                  <Activity
+                    size={13}
+                    strokeWidth={1.8}
+                    className="text-[#C9A86A] flex-shrink-0 mt-0.5 animate-pulse"
+                  />
+                )}
+                {queued && (
+                  <Clock
+                    size={12}
+                    strokeWidth={1.7}
+                    className="text-text-tertiary flex-shrink-0 mt-0.5"
+                  />
                 )}
                 <span
-                  className={status === "done" ? "text-text-primary" : "text-text-secondary"}
+                  className={
+                    done
+                      ? "text-text-primary flex-1"
+                      : running
+                        ? "text-text-primary font-medium flex-1"
+                        : "text-text-secondary flex-1"
+                  }
                 >
                   {a}
                 </span>
-                {status === "done" && (
-                  <span className="pill pill-ok ml-auto flex-shrink-0">Done</span>
+                {done && (
+                  <span className="pill pill-ok flex-shrink-0">Done</span>
                 )}
-                {status === "queued" && (
-                  <span className="pill ml-auto flex-shrink-0">Queued</span>
+                {running && (
+                  <span
+                    className="pill flex-shrink-0"
+                    style={{
+                      background: "#2A2210",
+                      color: "#E0C083",
+                      border: "1px solid #4D3D1A",
+                    }}
+                  >
+                    Running…
+                  </span>
                 )}
+                {queued && <span className="pill flex-shrink-0">Queued</span>}
               </li>
             );
           })}
         </ul>
+
+        {!allDone && (
+          <div
+            className="mt-3 pt-3 border-t border-border-subtle text-[11.5px] leading-relaxed flex items-start gap-2"
+            style={{ color: "#8A8980" }}
+          >
+            <span className="text-[12px]" aria-hidden>
+              ☕
+            </span>
+            <span>
+              Spot will keep running these in the background — feel free to
+              step away. I&apos;ll surface the next decision here when one
+              of the watchers fires.
+            </span>
+          </div>
+        )}
       </motion.div>
 
       {/* Spot's recommendations — also surface on the dashboard */}
@@ -1065,8 +1286,16 @@ function LiveStep({ workflow }: { workflow: DiagnosticWorkflow }) {
 export function RecommendationCard({ rec }: { rec: PendingRecommendation }) {
   const urgencyTone =
     rec.urgency === "high" ? "pill-err" : rec.urgency === "medium" ? "pill-warn" : "pill-info";
+  // Local state · "open" → buttons visible, "approved" / "dismissed"
+  // → swap the footer for an outcome chip so the user sees the action
+  // landed. Demo-local · in real life this would persist server-side.
+  const [state, setState] = useState<"open" | "approved" | "dismissed">("open");
+
   return (
-    <div className="bg-white border border-border rounded-card p-3.5">
+    <div
+      className="bg-white border border-border rounded-card p-3.5 transition-opacity"
+      style={state === "dismissed" ? { opacity: 0.55 } : undefined}
+    >
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
@@ -1093,21 +1322,56 @@ export function RecommendationCard({ rec }: { rec: PendingRecommendation }) {
         <div className="text-[11.5px] text-text-secondary">
           <span className="text-text-tertiary">If approved:</span> {rec.projectedImpact}
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] text-text-tertiary hover:text-text-primary hover:bg-surface-secondary"
+        {state === "open" && (
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setState("dismissed")}
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button text-[11.5px] text-text-tertiary hover:text-text-primary hover:bg-surface-secondary"
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={() => setState("approved")}
+              className="inline-flex items-center gap-1 h-7 px-3 rounded-button text-[11.5px] font-semibold transition-colors"
+              style={{
+                background:
+                  "linear-gradient(135deg, #C9A86A 0%, #E0C083 100%)",
+                color: "#0A0A09",
+                boxShadow: "0 1px 0 rgba(0,0,0,0.05) inset",
+              }}
+            >
+              <SpotMark size={10} />
+              Approve · ship
+            </button>
+          </div>
+        )}
+        {state === "approved" && (
+          <span
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[10.5px] uppercase tracking-wider font-semibold"
+            style={{
+              background: "#0E2A1A",
+              color: "#34D399",
+              border: "1px solid #1A4D2A",
+            }}
           >
-            Dismiss
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-button bg-[#111] text-[#FAFAF8] hover:bg-black text-[11.5px] font-medium"
+            <Check size={11} strokeWidth={2.4} />
+            Shipped · live
+          </span>
+        )}
+        {state === "dismissed" && (
+          <span
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[10.5px] uppercase tracking-wider font-semibold"
+            style={{
+              background: "#1F1F1D",
+              color: "#8A8980",
+              border: "1px solid #2E2E2A",
+            }}
           >
-            <SpotMark size={10} />
-            Approve · ship
-          </button>
-        </div>
+            Dismissed
+          </span>
+        )}
       </div>
     </div>
   );

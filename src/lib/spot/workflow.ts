@@ -29,6 +29,7 @@ export type WorkflowStep =
   | "launch-plan"
   | "launch-building"
   | "launch-review"
+  | "launch-deploy"
   // Legacy launch step types — kept in the union so existing canvas
   // components keep compiling, but removed from STEP_ORDER. The new
   // flow folds all of these into launch-plan + launch-review.
@@ -65,13 +66,28 @@ export type WorkflowKind =
   | "test-angles"
   | "campaign-dive";
 
+/** Files the right canvas can show — Claude-Code-style file browser
+ *  of the product workspace. The chat header owns the picker (so the
+ *  toggle stays on the input side, like Claude), and the canvas
+ *  renders up to two of them side-by-side. `analysis` is only shown
+ *  for diagnostic workflows (scale / optimize / test-angles) where
+ *  Spot's findings are persisted as part of memory. */
+export type CanvasFile =
+  | "memory"
+  | "plan"
+  | "dashboard"
+  | "assets"
+  | "analysis";
+
 export const STEP_ORDER: WorkflowStep[] = [
   "deep-research",
   "product-setup",
   "kickoff",
   "launch-plan",
   "launch-building",
-  "launch-review",
+  // launch-review and launch-deploy are kept in the union for back-compat
+  // but no longer in the flow — building runs all 5 tasks (including
+  // launching campaigns) and advances straight to `done`.
   "done",
 ];
 
@@ -84,6 +100,7 @@ export const STEP_LABELS: Record<WorkflowStep, string> = {
   "launch-plan": "Plan",
   "launch-building": "Spot working",
   "launch-review": "Review & deploy",
+  "launch-deploy": "Deploying",
   // legacy step labels — kept for type-completeness only
   personas: "Personas",
   "media-plan": "Plan",
@@ -115,7 +132,6 @@ export const VISIBLE_STEPS: WorkflowStep[] = [
   "kickoff",
   "launch-plan",
   "launch-building",
-  "launch-review",
 ];
 
 /** Per-kind step order. nextStep() reads this off the workflow kind. */
@@ -163,6 +179,10 @@ export type ResearchedMemory = {
   offers: { label: string; meta?: string }[];
   /** Structured product brief rows · Spot's read on what the product *is*. */
   brief: { icon: string; label: string; value: string }[];
+  /** Personas Spot drafted from category research. First-class part of
+   *  product memory — the launch plan opens with persona creation, so
+   *  these need to live alongside the brief from day one. */
+  personas: { name: string; meta: string; pain: string }[];
 };
 
 /** Which question of the chat-driven new-product setup is currently
@@ -201,6 +221,11 @@ export type LaunchWorkflow = {
    *  "product-setup"; ignored after. */
   productSetupStage?: ProductSetupStage;
   productSetupAnswers?: ProductSetupAnswers;
+  /** Bottom-drawer open state on the left chat panel. False
+   *  immediately after startNewProductFlow (Spot's "preparing form"
+   *  tool-call is still running); flips to true after the ~1.4s
+   *  delay so the drawer slides up. Drives the entrance animation. */
+  productSetupModalOpen?: boolean;
 };
 
 /**
@@ -955,22 +980,31 @@ export const STEP_TOOL_CALL: Partial<Record<WorkflowStep, StepToolCall>> = {
   "launch-plan": {
     agent: "spot.plan",
     detail:
-      "personas.fetch · media.plan · creative.brief · forms.draft · campaigns.compile · agents.match — running in parallel…",
-    delayMs: 5600,
+      "personas.draft · memory.read · media.plan · creative.brief · rollout.sequence · budget.lock — running in parallel…",
+    delayMs: 11800,
   },
-  // Building step — Spot is working asynchronously. The tool-call is
-  // long-ish so the user can navigate away.
+  // Building step — Spot runs 5 tasks end-to-end: build creatives +
+  // forms + landing pages → lock campaign plan → verify CRM →
+  // build Pre-Sales Agent → launch campaigns. ~28s total, matching
+  // the task durations rendered in LaunchBuildingTaskLoader.
   "launch-building": {
     agent: "build.execute",
     detail:
-      "Creative Agent · Resize Agent · Landing Builder · Forms Agent · Campaign Compiler — building in the background.",
-    delayMs: 30000,
+      "Task 1/5 · creatives + forms + landing pages → 2/5 · campaign plan → 3/5 · CRM integrations → 4/5 · Pre-Sales Agent → 5/5 · launch campaigns.",
+    delayMs: 28000,
   },
   // Review step lands quickly — Spot just compiles assets for review.
   "launch-review": {
     agent: "build.complete",
     detail: "compiling preview · creatives, landing pages, lead forms, campaign tree…",
     delayMs: 2200,
+  },
+  // Deploy step · pushes everything live to Meta + Google + WhatsApp.
+  "launch-deploy": {
+    agent: "deploy.execute",
+    detail:
+      "ads.publish · pages.deploy · forms.publish · pixels.activate · tracking.verify…",
+    delayMs: 14000,
   },
   // Legacy steps below kept so any old in-flight workflow still narrates.
   personas: {
@@ -1043,13 +1077,13 @@ export function stepIntroMessage(
           {
             type: "text",
             text:
-              "Here's what I'd build for you — one plan covering personas, media, creatives, landing pages, lead forms, campaign tree, and outreach. Approve once and I'll spend ~2 hours assembling everything in the background.",
+              "Here's the plan — personas, media, creatives, landing pages, lead forms, campaign tree, and outreach. Five concrete tasks ready to run end-to-end: build creatives + forms + landing pages, lock the campaign plan, verify CRM integrations, spin up the Pre-Sales Agent, and launch campaigns. Approve once and I'll handle the rest.",
           },
           {
             type: "step-cta",
-            label: "Approve plan · I'll get to work",
+            label: "Put Spot to work",
             helper:
-              "I'll work in the background. You can keep using Revspot — I'll ping you when it's ready to review.",
+              "5 tasks · ~25 seconds end-to-end · I'll surface a summary once everything's live.",
             refineHint: "or tell me what to change before I start",
           },
         ],
@@ -1060,13 +1094,13 @@ export function stepIntroMessage(
         parts: [
           {
             type: "headline",
-            text: `Got it — working on ${w.productName}.`,
+            text: `On it — running 5 tasks for ${w.productName}.`,
             verdict: "info",
           },
           {
             type: "text",
             text:
-              "ETA ~2 hours. Five agents running in parallel: Creative Agent (12 statics + 6 reels), Resize Agent (48 variants), Landing Builder (3 pages), Forms Agent (2 lead forms), Campaign Compiler. I'll surface everything for your approval when it's done — keep working, I'll find you.",
+              "Building creatives + forms + landing pages → locking the campaign plan → verifying CRM integrations → spinning up the Pre-Sales Agent (Voice + WhatsApp) → launching campaigns. You can watch on the right or step away — I'll ping you when everything is live.",
           },
         ],
       };
@@ -1089,6 +1123,17 @@ export function stepIntroMessage(
             label: "Approve all · deploy live",
             helper: "I'll push to Meta + Google immediately and start the watchers.",
             refineHint: "or tell me which assets need a tweak",
+          },
+        ],
+      };
+    case "launch-deploy":
+      return {
+        role: "spot",
+        parts: [
+          {
+            type: "text",
+            text:
+              "Deploying to Meta + Google + WhatsApp now. ~14s end-to-end. Feel free to step away — I'll surface the final summary the moment it's live.",
           },
         ],
       };
