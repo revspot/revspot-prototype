@@ -599,19 +599,72 @@ export function LaunchBuildingStep({ workflow }: { workflow: LaunchWorkflow }) {
  * LaunchReviewStep · everything Spot built, for final approval
  * ═══════════════════════════════════════════════════════════════ */
 
-const PROPOSED_CREATIVES_REVIEW = [
-  { id: "c1", hook: "Mentor-led classes · capped at 60 students", persona: "Engineer Parent", format: "Reel", hue: 215 },
-  { id: "c2", hook: "Your kid's own progress · updated every Friday", persona: "Engineer Parent", format: "Static", hue: 28 },
-  { id: "c3", hook: "Doubt-clearing in 15 minutes · live", persona: "Self-Studier", format: "Reel", hue: 145 },
-  { id: "c4", hook: "24-month replay · no time pressure", persona: "Self-Studier", format: "Carousel", hue: 290 },
-  { id: "c5", hook: "Mentor 1:1 every fortnight · finally heard", persona: "Coaching Hopper", format: "Static", hue: 12 },
-  { id: "c6", hook: "Switching mid-year? We cover the gap", persona: "Coaching Hopper", format: "Reel", hue: 180 },
+/** Creatives grouped by persona, in the order the user wants to see
+ *  them: working professional first (gradient placeholders — no
+ *  uploaded source yet), then college student, then parent.
+ *
+ *  All real PNGs live in /public/assets/creatives/ (student-01..04,
+ *  parent-01..04). The professional persona is rendered as a soft
+ *  gradient so the grid still tells a complete story. */
+type ReviewCreative = {
+  id: string;
+  hook: string;
+  format: "Reel" | "Static" | "Carousel";
+  /** Path under /public — falls back to a gradient when undefined. */
+  src?: string;
+  hue: number;
+};
+
+type CreativePersonaGroup = {
+  persona: string;
+  sub: string;
+  swatch: string;
+  creatives: ReviewCreative[];
+};
+
+const CREATIVES_BY_PERSONA: CreativePersonaGroup[] = [
+  {
+    persona: "Working professional · Aspiring fluent speaker",
+    sub: "25-34 · tier-1/2 cities · LinkedIn-active",
+    swatch: "#1F5BE0",
+    creatives: [
+      { id: "wp1", hook: "Speak with the confidence your role deserves", format: "Reel", hue: 215 },
+      { id: "wp2", hook: "10 mins/day · fluent in 8 weeks", format: "Static", hue: 200 },
+    ],
+  },
+  {
+    persona: "College student · Interview prep",
+    sub: "18-24 · semi-urban · YouTube-heavy",
+    swatch: "#15803D",
+    creatives: [
+      { id: "cs1", hook: "Crack any interview · 6 weeks", format: "Reel", src: "/assets/creatives/student-01.png", hue: 200 },
+      { id: "cs2", hook: "From hesitation to fluent", format: "Reel", src: "/assets/creatives/student-02.png", hue: 215 },
+      { id: "cs3", hook: "Mock interviews · weekly", format: "Static", src: "/assets/creatives/student-03.png", hue: 188 },
+      { id: "cs4", hook: "Speak in 8 weeks · ₹0 risk", format: "Reel", src: "/assets/creatives/student-04.png", hue: 230 },
+    ],
+  },
+  {
+    persona: "Parent · Buying for child",
+    sub: "32-45 · tier-2/3 cities · WhatsApp + Facebook",
+    swatch: "#B45309",
+    creatives: [
+      { id: "pa1", hook: "Help your child speak with confidence", format: "Static", src: "/assets/creatives/parent-01.png", hue: 340 },
+      { id: "pa2", hook: "Trusted by 12,000+ parents", format: "Carousel", src: "/assets/creatives/parent-02.png", hue: 320 },
+      { id: "pa3", hook: "School-confidence in 8 weeks", format: "Static", src: "/assets/creatives/parent-03.png", hue: 300 },
+      { id: "pa4", hook: "Real-life parent confessions", format: "Reel", src: "/assets/creatives/parent-04.png", hue: 320 },
+    ],
+  },
 ];
 
+const TOTAL_CREATIVES_COUNT = CREATIVES_BY_PERSONA.reduce(
+  (s, g) => s + g.creatives.length,
+  0,
+);
+
 const PROPOSED_PAGES_REVIEW = [
-  { id: "lp1", title: "Demo class booking · Engineer Parent", persona: "Engineer Parent", sections: 6 },
-  { id: "lp2", title: "Free-mock landing · Self-Studier", persona: "Self-Studier", sections: 5 },
-  { id: "lp3", title: "1:1 call landing · Coaching Hopper", persona: "Coaching Hopper", sections: 4 },
+  { id: "lp1", title: "Speak-with-confidence landing · Working professional", persona: "Working professional", sections: 6 },
+  { id: "lp2", title: "Interview-prep landing · College student", persona: "College student", sections: 5 },
+  { id: "lp3", title: "Parent-led demo booking · Parent", persona: "Parent · Buying for child", sections: 5 },
 ];
 
 const SAMPLE_FORMS_COUNT = 2;
@@ -637,8 +690,8 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
 
         <div className="bg-white border border-border rounded-card p-4">
           <div className="grid grid-cols-5 gap-3">
-            <ReviewStat label="Creatives" value="18" sub="12 statics + 6 reels" />
-            <ReviewStat label="Resized variants" value="72" sub="4 sizes per angle" />
+            <ReviewStat label="Creatives" value={`${TOTAL_CREATIVES_COUNT}`} sub={`${CREATIVES_BY_PERSONA.length} personas · 1:1 + 9:16`} />
+            <ReviewStat label="Resized variants" value={`${TOTAL_CREATIVES_COUNT * 4}`} sub="4 sizes per angle" />
             <ReviewStat label="Landing pages" value="3" sub="mobile-first" />
             <ReviewStat label="Lead forms" value={`${SAMPLE_FORMS_COUNT}`} sub="+ WhatsApp scripts" />
             <ReviewStat label="Campaigns" value="3" sub="Meta + Google" />
@@ -650,43 +703,82 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
         <ReviewSectionHeader
           icon={ImageIcon}
           title="Generated creatives"
-          count={`${PROPOSED_CREATIVES_REVIEW.length} angles · 18 assets total`}
-          subtitle="Each angle resized into 4 formats. QA Agent reviewed all 72."
+          count={`${TOTAL_CREATIVES_COUNT} angles · grouped by persona`}
+          subtitle="Each angle resized into 4 formats. QA Agent reviewed every variant."
         />
-        <div className="grid grid-cols-3 gap-2.5">
-          {PROPOSED_CREATIVES_REVIEW.map((c) => {
-            const Icon = c.format === "Reel" ? Layers : c.format === "Carousel" ? Layout : ImageIcon;
-            return (
-              <div
-                key={c.id}
-                className="bg-white border border-border rounded-card overflow-hidden"
-              >
-                <div
-                  className="relative aspect-[4/3] w-full"
-                  style={{
-                    background: `linear-gradient(135deg, hsl(${c.hue} 60% 90%), hsl(${c.hue} 50% 70%))`,
-                  }}
-                >
-                  <div className="absolute top-2 left-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/85 backdrop-blur-sm">
-                    <Icon size={10} strokeWidth={1.7} />
-                  </div>
-                  <div className="absolute top-2 right-2 text-[9.5px] font-medium text-text-secondary bg-white/85 px-1.5 rounded-sm">
-                    {c.format}
-                  </div>
-                  <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[9.5px] font-medium bg-white/90 px-1.5 py-0.5 rounded-sm">
-                    <CheckCircle2 size={9} strokeWidth={2} className="text-[#15803D]" />
-                    <span>QA passed</span>
-                  </div>
-                </div>
-                <div className="p-2.5">
-                  <div className="text-[11.5px] font-medium text-text-primary leading-snug line-clamp-2 min-h-[2.6em]">
-                    {c.hook}
-                  </div>
-                  <div className="text-[10.5px] text-text-tertiary mt-1">{c.persona}</div>
-                </div>
+        <div className="space-y-4">
+          {CREATIVES_BY_PERSONA.map((group) => (
+            <div key={group.persona}>
+              {/* Persona group header · swatch + name + count */}
+              <div className="flex items-center gap-2 mb-2 px-0.5">
+                <span
+                  className="inline-flex w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ background: group.swatch }}
+                />
+                <span className="text-[11.5px] font-semibold text-text-primary">
+                  {group.persona}
+                </span>
+                <span className="text-[10.5px] text-text-tertiary">
+                  · {group.sub}
+                </span>
+                <span className="text-[10.5px] text-text-tertiary ml-auto tabular">
+                  {group.creatives.length} angle{group.creatives.length === 1 ? "" : "s"}
+                </span>
               </div>
-            );
-          })}
+              {/* Creative grid for this persona */}
+              <div className="grid grid-cols-4 gap-2.5">
+                {group.creatives.map((c) => {
+                  const Icon =
+                    c.format === "Reel"
+                      ? Layers
+                      : c.format === "Carousel"
+                        ? Layout
+                        : ImageIcon;
+                  return (
+                    <div
+                      key={c.id}
+                      className="bg-white border border-border rounded-card overflow-hidden"
+                    >
+                      <div
+                        className="relative aspect-square w-full"
+                        style={
+                          c.src
+                            ? { background: "#0A0A09" }
+                            : {
+                                background: `linear-gradient(135deg, hsl(${c.hue} 60% 90%), hsl(${c.hue} 50% 70%))`,
+                              }
+                        }
+                      >
+                        {c.src && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.src}
+                            alt={c.hook}
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                        )}
+                        <div className="absolute top-2 left-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/85 backdrop-blur-sm">
+                          <Icon size={10} strokeWidth={1.7} />
+                        </div>
+                        <div className="absolute top-2 right-2 text-[9.5px] font-medium text-text-secondary bg-white/85 px-1.5 rounded-sm">
+                          {c.format}
+                        </div>
+                        <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[9.5px] font-medium bg-white/90 px-1.5 py-0.5 rounded-sm">
+                          <CheckCircle2 size={9} strokeWidth={2} className="text-[#15803D]" />
+                          <span>QA passed</span>
+                        </div>
+                      </div>
+                      <div className="p-2.5">
+                        <div className="text-[11.5px] font-medium text-text-primary leading-snug line-clamp-2 min-h-[2.6em]">
+                          {c.hook}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </motion.div>
 
