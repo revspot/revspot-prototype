@@ -16,7 +16,6 @@
 import {
   CheckCircle2,
   Image as ImageIcon,
-  Layout,
   Megaphone,
   Mic,
   Users,
@@ -25,7 +24,6 @@ import {
   Wifi,
   FileText,
   Smartphone,
-  Layers,
   Target,
   Beaker,
   ArrowRight,
@@ -599,19 +597,199 @@ export function LaunchBuildingStep({ workflow }: { workflow: LaunchWorkflow }) {
  * LaunchReviewStep · everything Spot built, for final approval
  * ═══════════════════════════════════════════════════════════════ */
 
-const PROPOSED_CREATIVES_REVIEW = [
-  { id: "c1", hook: "Mentor-led classes · capped at 60 students", persona: "Engineer Parent", format: "Reel", hue: 215 },
-  { id: "c2", hook: "Your kid's own progress · updated every Friday", persona: "Engineer Parent", format: "Static", hue: 28 },
-  { id: "c3", hook: "Doubt-clearing in 15 minutes · live", persona: "Self-Studier", format: "Reel", hue: 145 },
-  { id: "c4", hook: "24-month replay · no time pressure", persona: "Self-Studier", format: "Carousel", hue: 290 },
-  { id: "c5", hook: "Mentor 1:1 every fortnight · finally heard", persona: "Coaching Hopper", format: "Static", hue: 12 },
-  { id: "c6", hook: "Switching mid-year? We cover the gap", persona: "Coaching Hopper", format: "Reel", hue: 180 },
+/** Creatives grouped by persona, in the order the user wants to see
+ *  them: working professional first (gradient placeholders — no
+ *  uploaded source yet), then college student, then parent.
+ *
+ *  All real PNGs live in /public/assets/creatives/ (student-01..04,
+ *  parent-01..04). The professional persona is rendered as a soft
+ *  gradient so the grid still tells a complete story. */
+type ReviewCreative = {
+  id: string;
+  hook: string;
+  format: "Reel" | "Static" | "Carousel";
+  /** Path under /public — falls back to a gradient when undefined. */
+  src?: string;
+  hue: number;
+};
+
+type ChannelChip = {
+  label: string;
+  /** Short rationale shown in a tooltip-style line under the chip row. */
+  why?: string;
+};
+
+type CreativePersonaGroup = {
+  persona: string;
+  sub: string;
+  pain: string;
+  swatch: string;
+  channels: ChannelChip[];
+  channelRationale: string;
+  creatives: ReviewCreative[];
+};
+
+const CREATIVES_BY_PERSONA: CreativePersonaGroup[] = [
+  {
+    persona: "Working professional · Aspiring fluent speaker",
+    sub: "25-34 · tier-1/2 cities · LinkedIn-active",
+    pain: "Stalled career growth from English gap",
+    swatch: "#1F5BE0",
+    channels: [
+      { label: "LinkedIn Ads" },
+      { label: "Meta · Instagram" },
+      { label: "Google Search" },
+    ],
+    channelRationale:
+      "LinkedIn captures intent at the career moment. Instagram reaches them off-hours; Google Search picks up bottom-funnel 'spoken English course' queries.",
+    creatives: [
+      { id: "wp1", hook: "Master English for career success", format: "Reel", src: "/assets/creatives/professional-01.png", hue: 215 },
+      { id: "wp2", hook: "Boost the confidence your role deserves", format: "Static", src: "/assets/creatives/professional-02.png", hue: 200 },
+    ],
+  },
+  {
+    persona: "College student · Interview prep",
+    sub: "18-24 · semi-urban · YouTube-heavy",
+    pain: "Campus placement interviews",
+    swatch: "#15803D",
+    channels: [
+      { label: "YouTube" },
+      { label: "Instagram Reels" },
+      { label: "Google Search" },
+    ],
+    channelRationale:
+      "YouTube is where they study and binge — pre-rolls + bumper ads on test-prep content. Reels covers scroll-time; Search covers exam/placement-prep keywords.",
+    creatives: [
+      { id: "cs1", hook: "Excel in campus interviews", format: "Reel", src: "/assets/creatives/student-03.png", hue: 200 },
+      { id: "cs2", hook: "Placement prep made easy", format: "Static", src: "/assets/creatives/student-04.png", hue: 215 },
+    ],
+  },
+  {
+    persona: "Parent · Buying for child",
+    sub: "32-45 · tier-2/3 cities · WhatsApp + Facebook",
+    pain: "Child's school confidence",
+    swatch: "#B45309",
+    channels: [
+      { label: "Meta · Facebook" },
+      { label: "WhatsApp" },
+      { label: "Google Discover" },
+    ],
+    channelRationale:
+      "Facebook is their primary feed. WhatsApp click-to-chat turns interest into a conversation with the Pre-Sales Agent. Discover catches passive parenting research.",
+    creatives: [
+      { id: "pa1", hook: "Help your child speak with confidence", format: "Static", src: "/assets/creatives/parent-01.png", hue: 340 },
+      { id: "pa2", hook: "Trusted by 12,000+ parents", format: "Carousel", src: "/assets/creatives/parent-02.png", hue: 320 },
+      { id: "pa3", hook: "School-confidence in 8 weeks", format: "Static", src: "/assets/creatives/parent-03.png", hue: 300 },
+      { id: "pa4", hook: "Real-life parent confessions", format: "Reel", src: "/assets/creatives/parent-04.png", hue: 320 },
+    ],
+  },
 ];
 
+const TOTAL_CREATIVES_COUNT = CREATIVES_BY_PERSONA.reduce(
+  (s, g) => s + g.creatives.length,
+  0,
+);
+
+/** Detailed campaign plan rendered at the end of the launch-review
+ *  canvas. One campaign per persona, each with its own platform mix,
+ *  budget split, ad set structure, and CPL target. */
+type CampaignAdSet = {
+  id: string;
+  name: string;
+  audience: string;
+  ads: number;
+};
+
+type CampaignRow = {
+  id: string;
+  name: string;
+  persona: string;
+  swatch: string;
+  objective: string;
+  platform: string;
+  dailyBudget: number;
+  targetCpl: number;
+  expectedLeadsPerDay: number;
+  goal: string;
+  adSets: CampaignAdSet[];
+};
+
+const CAMPAIGN_PLAN: CampaignRow[] = [
+  {
+    id: "camp-wp",
+    name: "Working Pro · Career fluency",
+    persona: "Working professional",
+    swatch: "#1F5BE0",
+    objective: "Lead gen (demo booking)",
+    platform: "LinkedIn + Meta + Search",
+    dailyBudget: 600,
+    targetCpl: 380,
+    expectedLeadsPerDay: 16,
+    goal: "Book 200 demos · 14 days",
+    adSets: [
+      { id: "wp-as1", name: "LinkedIn · job titles + skills", audience: "Mid-level IC, manager · LinkedIn-active", ads: 4 },
+      { id: "wp-as2", name: "Meta · interest stack · LinkedIn lookalike", audience: "Custom Audience · 1% LAL", ads: 4 },
+      { id: "wp-as3", name: "Google Search · 'spoken English for professionals'", audience: "High-intent BoFu keywords", ads: 3 },
+    ],
+  },
+  {
+    id: "camp-cs",
+    name: "College Student · Placement edge",
+    persona: "College student",
+    swatch: "#15803D",
+    objective: "Lead gen (mock + free class)",
+    platform: "YouTube + Reels + Search",
+    dailyBudget: 500,
+    targetCpl: 240,
+    expectedLeadsPerDay: 21,
+    goal: "Book 290 free classes · 14 days",
+    adSets: [
+      { id: "cs-as1", name: "YouTube · placement-prep & study channels", audience: "18-24 · semi-urban · test-prep viewers", ads: 4 },
+      { id: "cs-as2", name: "Instagram Reels · short-form story", audience: "Campus interest stack", ads: 4 },
+      { id: "cs-as3", name: "Google Search · 'campus placement English'", audience: "Exam + placement keywords", ads: 3 },
+    ],
+  },
+  {
+    id: "camp-pa",
+    name: "Parent · Child confidence",
+    persona: "Parent · Buying for child",
+    swatch: "#B45309",
+    objective: "Lead gen (WhatsApp conversation)",
+    platform: "Meta + WhatsApp + Discover",
+    dailyBudget: 700,
+    targetCpl: 310,
+    expectedLeadsPerDay: 22,
+    goal: "Open 310 parent chats · 14 days",
+    adSets: [
+      { id: "pa-as1", name: "Facebook feed · child-confidence hooks", audience: "32-45 · parents · tier-2/3", ads: 4 },
+      { id: "pa-as2", name: "Meta CTW (Click-to-WhatsApp)", audience: "Lookalike · prior demo bookers", ads: 4 },
+      { id: "pa-as3", name: "Google Discover · parenting + edutech", audience: "Discover affinity audiences", ads: 3 },
+    ],
+  },
+];
+
+const TOTAL_AD_SETS = CAMPAIGN_PLAN.reduce((s, c) => s + c.adSets.length, 0);
+const TOTAL_ADS = CAMPAIGN_PLAN.reduce(
+  (s, c) => s + c.adSets.reduce((ss, a) => ss + a.ads, 0),
+  0,
+);
+const TOTAL_DAILY_BUDGET = CAMPAIGN_PLAN.reduce(
+  (s, c) => s + c.dailyBudget,
+  0,
+);
+const TOTAL_EXPECTED_LEADS_DAY = CAMPAIGN_PLAN.reduce(
+  (s, c) => s + c.expectedLeadsPerDay,
+  0,
+);
+const BLENDED_TARGET_CPL = Math.round(
+  CAMPAIGN_PLAN.reduce((s, c) => s + c.dailyBudget, 0) /
+    CAMPAIGN_PLAN.reduce((s, c) => s + c.expectedLeadsPerDay, 0),
+);
+
 const PROPOSED_PAGES_REVIEW = [
-  { id: "lp1", title: "Demo class booking · Engineer Parent", persona: "Engineer Parent", sections: 6 },
-  { id: "lp2", title: "Free-mock landing · Self-Studier", persona: "Self-Studier", sections: 5 },
-  { id: "lp3", title: "1:1 call landing · Coaching Hopper", persona: "Coaching Hopper", sections: 4 },
+  { id: "lp1", title: "Speak-with-confidence landing · Working professional", persona: "Working professional", sections: 6 },
+  { id: "lp2", title: "Interview-prep landing · College student", persona: "College student", sections: 5 },
+  { id: "lp3", title: "Parent-led demo booking · Parent", persona: "Parent · Buying for child", sections: 5 },
 ];
 
 const SAMPLE_FORMS_COUNT = 2;
@@ -637,8 +815,8 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
 
         <div className="bg-white border border-border rounded-card p-4">
           <div className="grid grid-cols-5 gap-3">
-            <ReviewStat label="Creatives" value="18" sub="12 statics + 6 reels" />
-            <ReviewStat label="Resized variants" value="72" sub="4 sizes per angle" />
+            <ReviewStat label="Creatives" value={`${TOTAL_CREATIVES_COUNT}`} sub={`${CREATIVES_BY_PERSONA.length} personas · 1:1 + 9:16`} />
+            <ReviewStat label="Resized variants" value={`${TOTAL_CREATIVES_COUNT * 4}`} sub="4 sizes per angle" />
             <ReviewStat label="Landing pages" value="3" sub="mobile-first" />
             <ReviewStat label="Lead forms" value={`${SAMPLE_FORMS_COUNT}`} sub="+ WhatsApp scripts" />
             <ReviewStat label="Campaigns" value="3" sub="Meta + Google" />
@@ -650,43 +828,103 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
         <ReviewSectionHeader
           icon={ImageIcon}
           title="Generated creatives"
-          count={`${PROPOSED_CREATIVES_REVIEW.length} angles · 18 assets total`}
-          subtitle="Each angle resized into 4 formats. QA Agent reviewed all 72."
+          count={`${TOTAL_CREATIVES_COUNT} angles · grouped by persona`}
+          subtitle="Each angle resized into 4 formats. QA Agent reviewed every variant."
         />
-        <div className="grid grid-cols-3 gap-2.5">
-          {PROPOSED_CREATIVES_REVIEW.map((c) => {
-            const Icon = c.format === "Reel" ? Layers : c.format === "Carousel" ? Layout : ImageIcon;
-            return (
-              <div
-                key={c.id}
-                className="bg-white border border-border rounded-card overflow-hidden"
-              >
-                <div
-                  className="relative aspect-[4/3] w-full"
-                  style={{
-                    background: `linear-gradient(135deg, hsl(${c.hue} 60% 90%), hsl(${c.hue} 50% 70%))`,
-                  }}
-                >
-                  <div className="absolute top-2 left-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/85 backdrop-blur-sm">
-                    <Icon size={10} strokeWidth={1.7} />
-                  </div>
-                  <div className="absolute top-2 right-2 text-[9.5px] font-medium text-text-secondary bg-white/85 px-1.5 rounded-sm">
-                    {c.format}
-                  </div>
-                  <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[9.5px] font-medium bg-white/90 px-1.5 py-0.5 rounded-sm">
-                    <CheckCircle2 size={9} strokeWidth={2} className="text-[#15803D]" />
-                    <span>QA passed</span>
-                  </div>
-                </div>
-                <div className="p-2.5">
-                  <div className="text-[11.5px] font-medium text-text-primary leading-snug line-clamp-2 min-h-[2.6em]">
-                    {c.hook}
-                  </div>
-                  <div className="text-[10.5px] text-text-tertiary mt-1">{c.persona}</div>
-                </div>
+        <div className="space-y-4">
+          {CREATIVES_BY_PERSONA.map((group) => (
+            <div key={group.persona}>
+              {/* Persona group header · swatch + name + sub-line + count */}
+              <div className="flex items-center gap-2 mb-1 px-0.5">
+                <span
+                  className="inline-flex w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ background: group.swatch }}
+                />
+                <span className="text-[11.5px] font-semibold text-text-primary">
+                  {group.persona}
+                </span>
+                <span className="text-[10.5px] text-text-tertiary">
+                  · {group.sub}
+                </span>
+                <span className="text-[10.5px] text-text-tertiary ml-auto tabular">
+                  {group.creatives.length} angle{group.creatives.length === 1 ? "" : "s"}
+                </span>
               </div>
-            );
-          })}
+              {/* Pain row */}
+              <div className="text-[10.5px] text-text-tertiary mb-1.5 px-0.5">
+                <span className="uppercase tracking-wider font-semibold text-[#B45309] mr-1.5">
+                  Pain
+                </span>
+                {group.pain}
+              </div>
+              {/* Channels row · which media surfaces Spot will target */}
+              <div className="flex items-center gap-1.5 flex-wrap mb-1 px-0.5">
+                <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">
+                  Channels
+                </span>
+                {group.channels.map((ch) => (
+                  <span
+                    key={ch.label}
+                    className="inline-flex items-center gap-1 h-5 px-1.5 rounded-full text-[10.5px] font-medium"
+                    style={{
+                      background: `${group.swatch}14`,
+                      color: group.swatch,
+                      border: `1px solid ${group.swatch}33`,
+                    }}
+                  >
+                    {ch.label}
+                  </span>
+                ))}
+              </div>
+              {/* Channel rationale */}
+              <div className="text-[10.5px] text-text-tertiary leading-relaxed mb-2 px-0.5">
+                {group.channelRationale}
+              </div>
+              {/* Creative grid for this persona */}
+              <div className="grid grid-cols-4 gap-2.5">
+                {group.creatives.map((c) => {
+                  return (
+                    <div
+                      key={c.id}
+                      className="bg-white border border-border rounded-card overflow-hidden"
+                    >
+                      <div
+                        className="relative aspect-square w-full"
+                        style={
+                          c.src
+                            ? { background: "#0A0A09" }
+                            : {
+                                background: `linear-gradient(135deg, hsl(${c.hue} 60% 90%), hsl(${c.hue} 50% 70%))`,
+                              }
+                        }
+                      >
+                        {c.src && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.src}
+                            alt={c.hook}
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                        )}
+                        <div className="absolute top-2 right-2 text-[9.5px] font-medium text-text-secondary bg-white/85 px-1.5 rounded-sm">
+                          {c.format}
+                        </div>
+                        <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[9.5px] font-medium bg-white/90 px-1.5 py-0.5 rounded-sm">
+                          <CheckCircle2 size={9} strokeWidth={2} className="text-[#15803D]" />
+                          <span>QA passed</span>
+                        </div>
+                      </div>
+                      <div className="p-2.5">
+                        <div className="text-[11.5px] font-medium text-text-primary leading-snug line-clamp-2 min-h-[2.6em]">
+                          {c.hook}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </motion.div>
 
@@ -739,8 +977,96 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
 
       <motion.div variants={canvasReveal} className="grid grid-cols-3 gap-2.5 mb-4">
         <ReviewBucket icon={FileText} title="Lead forms" count={`${SAMPLE_FORMS_COUNT}`} subtitle="Meta + WhatsApp" />
-        <ReviewBucket icon={Megaphone} title="Campaign tree" count="3" subtitle="Meta + Google · 23 ads total" />
+        <ReviewBucket icon={Megaphone} title="Campaign tree" count={`${CAMPAIGN_PLAN.length}`} subtitle="Meta + Google + LinkedIn" />
         <ReviewBucket icon={Mic} title="Voice agent" count="Sherpa" subtitle="Voice + WA · provisioned" />
+      </motion.div>
+
+      {/* ── Detailed campaign plan · day-1 structure across personas ── */}
+      <motion.div variants={canvasReveal} className="mb-4">
+        <ReviewSectionHeader
+          icon={Megaphone}
+          title="Detailed campaign plan"
+          count={`${CAMPAIGN_PLAN.length} campaigns · ${TOTAL_AD_SETS} ad sets · ${TOTAL_ADS} ads`}
+          subtitle={`Day-1 budget · ₹${TOTAL_DAILY_BUDGET.toLocaleString("en-IN")}/day across all channels`}
+        />
+        <div className="space-y-2.5">
+          {CAMPAIGN_PLAN.map((c) => (
+            <div
+              key={c.id}
+              className="bg-white border border-border rounded-card overflow-hidden"
+            >
+              {/* Campaign header */}
+              <div
+                className="flex items-center gap-2.5 px-3 py-2.5"
+                style={{
+                  background: `${c.swatch}08`,
+                  borderBottom: `1px solid ${c.swatch}1F`,
+                }}
+              >
+                <span
+                  className="inline-flex w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ background: c.swatch }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12.5px] font-semibold text-text-primary leading-tight">
+                    {c.name}
+                  </div>
+                  <div className="text-[10.5px] text-text-tertiary mt-0.5">
+                    {c.persona} · {c.objective}
+                  </div>
+                </div>
+                <div className="text-[10.5px] text-text-tertiary text-right flex-shrink-0">
+                  <div className="font-mono tabular text-[11px] text-text-primary">
+                    ₹{c.dailyBudget.toLocaleString("en-IN")}/day
+                  </div>
+                  <div>{c.platform}</div>
+                </div>
+              </div>
+              {/* Ad sets */}
+              <div className="px-3 py-2">
+                <div className="text-[9.5px] uppercase tracking-wider text-text-tertiary font-semibold mb-1.5">
+                  Ad sets · {c.adSets.length}
+                </div>
+                <div className="space-y-1">
+                  {c.adSets.map((a) => (
+                    <div
+                      key={a.id}
+                      className="flex items-center gap-2 text-[11.5px] text-text-primary"
+                    >
+                      <ChevronRight size={10} strokeWidth={1.8} className="text-text-tertiary flex-shrink-0" />
+                      <span className="flex-1 truncate">{a.name}</span>
+                      <span className="text-[10.5px] text-text-tertiary flex-shrink-0">{a.audience}</span>
+                      <span className="text-[10.5px] font-mono tabular text-text-tertiary flex-shrink-0">{a.ads} ads</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* KPI strip */}
+              <div
+                className="flex items-center gap-4 px-3 py-2 text-[10.5px]"
+                style={{ borderTop: "1px solid #F0EFE9", background: "#FAFAF8" }}
+              >
+                <span className="text-text-tertiary">
+                  Target CPL <span className="text-text-primary font-semibold">₹{c.targetCpl}</span>
+                </span>
+                <span className="text-text-tertiary">
+                  Expected leads/day <span className="text-text-primary font-semibold">{c.expectedLeadsPerDay}</span>
+                </span>
+                <span className="text-text-tertiary">
+                  Goal <span className="text-text-primary font-semibold">{c.goal}</span>
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Budget + cadence summary strip */}
+        <div className="mt-3 grid grid-cols-4 gap-2.5">
+          <CampaignSummaryStat label="Daily budget" value={`₹${TOTAL_DAILY_BUDGET.toLocaleString("en-IN")}`} sub="across all channels" />
+          <CampaignSummaryStat label="14-day spend" value={`₹${(TOTAL_DAILY_BUDGET * 14).toLocaleString("en-IN")}`} sub="phase 1 + 2" />
+          <CampaignSummaryStat label="Expected leads" value={`${TOTAL_EXPECTED_LEADS_DAY * 14}`} sub="14-day projection" />
+          <CampaignSummaryStat label="Blended CPL" value={`₹${BLENDED_TARGET_CPL}`} sub="weighted across personas" />
+        </div>
       </motion.div>
 
       <motion.div
@@ -789,6 +1115,28 @@ function ReviewStat({ label, value, sub }: { label: string; value: string; sub: 
         {value}
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">{sub}</div>
+    </div>
+  );
+}
+
+function CampaignSummaryStat({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  return (
+    <div className="bg-white border border-border rounded-card p-3">
+      <div className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold mb-1">
+        {label}
+      </div>
+      <div className="text-[15px] font-semibold text-text-primary tabular leading-tight">
+        {value}
+      </div>
+      <div className="text-[10px] text-text-tertiary mt-0.5">{sub}</div>
     </div>
   );
 }

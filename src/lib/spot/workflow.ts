@@ -85,9 +85,12 @@ export const STEP_ORDER: WorkflowStep[] = [
   "kickoff",
   "launch-plan",
   "launch-building",
-  // launch-review and launch-deploy are kept in the union for back-compat
-  // but no longer in the flow — building runs all 5 tasks (including
-  // launching campaigns) and advances straight to `done`.
+  // Building drafts everything (creatives, forms, landing pages, plan,
+  // CRM wiring, Pre-Sales Agent) but waits for the user to review
+  // before publishing. launch-review surfaces the full asset pack and
+  // launch-deploy runs the publish-to-Meta+Google animation.
+  "launch-review",
+  "launch-deploy",
   "done",
 ];
 
@@ -132,6 +135,7 @@ export const VISIBLE_STEPS: WorkflowStep[] = [
   "kickoff",
   "launch-plan",
   "launch-building",
+  "launch-review",
 ];
 
 /** Per-kind step order. nextStep() reads this off the workflow kind. */
@@ -985,26 +989,27 @@ export const STEP_TOOL_CALL: Partial<Record<WorkflowStep, StepToolCall>> = {
   },
   // Building step — Spot runs 5 tasks end-to-end: build creatives +
   // forms + landing pages → lock campaign plan → verify CRM →
-  // build Pre-Sales Agent → launch campaigns. ~28s total, matching
-  // the task durations rendered in LaunchBuildingTaskLoader.
+  // build Pre-Sales Agent → prepare campaigns to go live. ~19.5s
+  // total, matching the task durations rendered in
+  // LaunchBuildingTaskLoader.
   "launch-building": {
     agent: "build.execute",
     detail:
-      "Task 1/5 · creatives + forms + landing pages → 2/5 · campaign plan → 3/5 · CRM integrations → 4/5 · Pre-Sales Agent → 5/5 · launch campaigns.",
-    delayMs: 28000,
+      "Task 1/5 · creatives + forms + landing pages → 2/5 · campaign plan → 3/5 · CRM integrations → 4/5 · Pre-Sales Agent → 5/5 · prep campaigns.",
+    delayMs: 19500,
   },
   // Review step lands quickly — Spot just compiles assets for review.
   "launch-review": {
     agent: "build.complete",
     detail: "compiling preview · creatives, landing pages, lead forms, campaign tree…",
-    delayMs: 2200,
+    delayMs: 1600,
   },
   // Deploy step · pushes everything live to Meta + Google + WhatsApp.
   "launch-deploy": {
     agent: "deploy.execute",
     detail:
       "ads.publish · pages.deploy · forms.publish · pixels.activate · tracking.verify…",
-    delayMs: 14000,
+    delayMs: 10000,
   },
   // Legacy steps below kept so any old in-flight workflow still narrates.
   personas: {

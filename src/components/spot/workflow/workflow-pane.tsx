@@ -221,6 +221,13 @@ export function WorkflowPane() {
     workflow.kind === "launch-campaign" &&
     workflow.step === "launch-building";
 
+  // Review Assets & Launch → enter launch-review. The whole canvas
+  // becomes the asset pack preview (creatives, landing pages, lead
+  // forms, campaign tree, voice agent) for final approval.
+  const isReviewing =
+    workflow.kind === "launch-campaign" &&
+    workflow.step === "launch-review";
+
   // Approve all · deploy live → enter the deploy phase. Same dark
   // Spot pattern but with deployment-specific cycling thoughts.
   const isDeploying =
@@ -354,6 +361,10 @@ export function WorkflowPane() {
                         ? workflow.productName
                         : ""
                     }
+                  />
+                ) : isReviewing && tab !== "memory" ? (
+                  <LaunchReviewStep
+                    workflow={workflow as LaunchWorkflow}
                   />
                 ) : isDeploying ? (
                   <DeployingLoader
@@ -1697,31 +1708,31 @@ const LAUNCH_BUILD_TASKS: {
     id: "creatives",
     label: "Building creatives, forms, landing pages",
     sub: "12 statics · 6 reels · 3 landing pages · 2 lead forms",
-    duration: 6500,
+    duration: 4500,
   },
   {
     id: "plan",
     label: "Building the campaign plan",
     sub: "3 Meta campaigns · 9 ad sets · Google Search + Discover",
-    duration: 5000,
+    duration: 3500,
   },
   {
     id: "crm",
     label: "Verifying CRM integrations",
     sub: "lead routing · pixel · CAPI · attribution windows",
-    duration: 4500,
+    duration: 3200,
   },
   {
     id: "agent",
     label: "Building Pre-Sales Agent (Voice + WhatsApp)",
     sub: "agent persona · script · objection handling · escalation rules",
-    duration: 6500,
+    duration: 4500,
   },
   {
     id: "launch",
-    label: "Launching campaigns",
-    sub: "publishing to Meta + Google · arming the watchers",
-    duration: 5500,
+    label: "Preparing campaigns to go live",
+    sub: "drafted on Meta + Google · pixel armed · waiting for your approval",
+    duration: 3800,
   },
 ];
 
@@ -2057,29 +2068,67 @@ function LaunchBuildingLoader({ productName }: { productName: string }) {
         </ul>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2 mt-7">
-        <button
-          type="button"
-          onClick={() =>
-            router.push("/memory?focus=prod-guyjus-spoken-english")
-          }
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] font-medium transition-colors"
-          style={{ background: "#FAFAF8", color: "#0A0A09" }}
-        >
-          View project memory
-          <ArrowRight size={11} strokeWidth={1.8} />
-        </button>
-        <button
-          type="button"
-          onClick={showHomeView}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] transition-colors hover:bg-white/5"
-          style={{ color: "#A8A8A0" }}
-        >
-          <Home size={12} strokeWidth={1.7} />
-          Back to Spot homepage
-        </button>
-      </div>
+      {/* Actions · while building, two soft secondary buttons let the
+          user step away. Once all 5 tasks are done, those collapse
+          into one primary gold CTA: "Review Assets & Launch" — the
+          single decision Spot needs from the user before pushing live. */}
+      {doneCount < LAUNCH_BUILD_TASKS.length ? (
+        <div className="flex items-center gap-2 mt-7">
+          <button
+            type="button"
+            onClick={() =>
+              router.push("/memory?focus=prod-guyjus-spoken-english")
+            }
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] font-medium transition-colors"
+            style={{ background: "#FAFAF8", color: "#0A0A09" }}
+          >
+            View project memory
+            <ArrowRight size={11} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            onClick={showHomeView}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-button text-[12px] transition-colors hover:bg-white/5"
+            style={{ color: "#A8A8A0" }}
+          >
+            <Home size={12} strokeWidth={1.7} />
+            Back to Spot homepage
+          </button>
+        </div>
+      ) : (
+        <ReviewAssetsCta />
+      )}
+    </div>
+  );
+}
+
+/** Gold primary CTA shown at the bottom of LaunchBuildingLoader once
+ *  all 5 build tasks are done. Advances the workflow into
+ *  launch-review, where the user sees creatives, landing pages, lead
+ *  forms, the campaign tree, and the voice agent before approving the
+ *  actual launch. */
+function ReviewAssetsCta() {
+  const advanceWorkflow = useSpotStore((s) => s.advanceWorkflow);
+  return (
+    <div className="flex flex-col items-center gap-1.5 mt-7">
+      <button
+        type="button"
+        onClick={() => advanceWorkflow()}
+        className="inline-flex items-center gap-2 h-9 px-4 rounded-button text-[13px] font-semibold transition-transform hover:scale-[1.02] active:scale-[0.99]"
+        style={{
+          background:
+            "linear-gradient(135deg, #C9A86A 0%, #E0C083 60%, #D5B273 100%)",
+          color: "#1A1408",
+          boxShadow:
+            "0 8px 24px -6px rgba(201, 168, 106, 0.45), 0 2px 6px -1px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.35)",
+        }}
+      >
+        Review Assets &amp; Launch
+        <ArrowRight size={13} strokeWidth={2} />
+      </button>
+      <span className="text-[10.5px]" style={{ color: "#8A8980" }}>
+        Preview every creative · form · landing page · campaign before going live
+      </span>
     </div>
   );
 }
@@ -2363,7 +2412,7 @@ A small-budget, persona-led launch to learn what wins before we scale. Personas 
 
 ## Revspot Audience · pre-built targeting
 
-I&apos;ve identified a matching audience from the Revspot graph — high-intent users who&apos;ve engaged with adjacent EdTech products in the last 90 days but haven&apos;t converted yet. We can push this directly to Meta and Google as a Custom Audience so every campaign starts on a warm cohort instead of cold-prospecting from scratch.
+I've identified a matching audience from the Revspot graph — high-intent users who've engaged with adjacent EdTech products in the last 90 days but haven't converted yet. We can push this directly to Meta and Google as a Custom Audience so every campaign starts on a warm cohort instead of cold-prospecting from scratch.
 
 - 🎯 **Revspot Audience** · ~ 480K matched users · refreshes weekly
 - 🔵 **Meta** · pushed as a Custom Audience + 1% lookalike seed

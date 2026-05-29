@@ -944,15 +944,15 @@ export const useSpotStore = create<PanelState>((set) => ({
             return { thread: finalThread, workflow };
           });
 
-          // launch-building auto-advances to launch-review after the
-          // tool-call resolves. The user doesn't need to click anything —
-          // Spot finished building, surfaces the review notification.
+          // launch-building auto-advances to launch-review once the
+          // build tool-call resolves. Without this, a user who clicks
+          // "Back to Spot homepage" mid-build would see the parked
+          // banner stuck at "Spot is working · ETA ~2 hrs" forever.
+          // With this, the homepage banner naturally switches to the
+          // green "Ready to review · Review & approve" state when the
+          // build finishes, and the canvas swaps to LaunchReviewStep.
           if (upcoming === "launch-building") {
-            // Small additional beat so the "Got it · working on X" intro
-            // message lands and the user sees it briefly before the
-            // "ready to review" intro takes over.
             setTimeout(() => {
-              // Call the advance function from the live store reference.
               const store = useSpotStore.getState();
               if (store.workflow && store.workflow.step === "launch-building") {
                 store.advanceWorkflow();
