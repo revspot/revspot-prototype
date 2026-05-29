@@ -16,7 +16,6 @@
 import {
   CheckCircle2,
   Image as ImageIcon,
-  Layout,
   Megaphone,
   Mic,
   Users,
@@ -25,7 +24,6 @@ import {
   Wifi,
   FileText,
   Smartphone,
-  Layers,
   Target,
   Beaker,
   ArrowRight,
@@ -885,12 +883,6 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
               {/* Creative grid for this persona */}
               <div className="grid grid-cols-4 gap-2.5">
                 {group.creatives.map((c) => {
-                  const Icon =
-                    c.format === "Reel"
-                      ? Layers
-                      : c.format === "Carousel"
-                        ? Layout
-                        : ImageIcon;
                   return (
                     <div
                       key={c.id}
@@ -914,9 +906,6 @@ export function LaunchReviewStep({ workflow }: { workflow: LaunchWorkflow }) {
                             className="absolute inset-0 w-full h-full object-cover"
                           />
                         )}
-                        <div className="absolute top-2 left-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/85 backdrop-blur-sm">
-                          <Icon size={10} strokeWidth={1.7} />
-                        </div>
                         <div className="absolute top-2 right-2 text-[9.5px] font-medium text-text-secondary bg-white/85 px-1.5 rounded-sm">
                           {c.format}
                         </div>
