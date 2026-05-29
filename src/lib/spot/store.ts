@@ -944,11 +944,21 @@ export const useSpotStore = create<PanelState>((set) => ({
             return { thread: finalThread, workflow };
           });
 
-          // launch-building no longer auto-advances. The dark Spot
-          // loader on the canvas swaps in a "Review Assets & Launch"
-          // CTA once all 5 tasks are done, and the user clicks it to
-          // move into launch-review — keeps the user in control of the
-          // moment campaigns actually go live.
+          // launch-building auto-advances to launch-review once the
+          // build tool-call resolves. Without this, a user who clicks
+          // "Back to Spot homepage" mid-build would see the parked
+          // banner stuck at "Spot is working · ETA ~2 hrs" forever.
+          // With this, the homepage banner naturally switches to the
+          // green "Ready to review · Review & approve" state when the
+          // build finishes, and the canvas swaps to LaunchReviewStep.
+          if (upcoming === "launch-building") {
+            setTimeout(() => {
+              const store = useSpotStore.getState();
+              if (store.workflow && store.workflow.step === "launch-building") {
+                store.advanceWorkflow();
+              }
+            }, 600);
+          }
         }, tc.delayMs);
         return {
           workflow: nextWorkflow,

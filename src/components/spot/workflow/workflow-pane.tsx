@@ -1708,31 +1708,31 @@ const LAUNCH_BUILD_TASKS: {
     id: "creatives",
     label: "Building creatives, forms, landing pages",
     sub: "12 statics · 6 reels · 3 landing pages · 2 lead forms",
-    duration: 6500,
+    duration: 4500,
   },
   {
     id: "plan",
     label: "Building the campaign plan",
     sub: "3 Meta campaigns · 9 ad sets · Google Search + Discover",
-    duration: 5000,
+    duration: 3500,
   },
   {
     id: "crm",
     label: "Verifying CRM integrations",
     sub: "lead routing · pixel · CAPI · attribution windows",
-    duration: 4500,
+    duration: 3200,
   },
   {
     id: "agent",
     label: "Building Pre-Sales Agent (Voice + WhatsApp)",
     sub: "agent persona · script · objection handling · escalation rules",
-    duration: 6500,
+    duration: 4500,
   },
   {
     id: "launch",
     label: "Preparing campaigns to go live",
     sub: "drafted on Meta + Google · pixel armed · waiting for your approval",
-    duration: 5500,
+    duration: 3800,
   },
 ];
 
